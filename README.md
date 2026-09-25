@@ -43,11 +43,15 @@ The runtime modes are a single setting that can be changed while it runs:
 
 Replies to prospects still go to the approval queue in `AUTONOMOUS` unless `replies.autonomous: true`. A warm reply (interested, or asking a question) is handed to Rohit with a suggested answer.
 
-## Quick start
+## Quick start: verify it yourself
+
+**[docs/VERIFY.md](docs/VERIFY.md)** has the exact commands, the expected outputs, where to see every lead / message / decision, and what is and is not proven. In short:
 
 ```bash
-uv venv --python 3.11 && uv pip install -e ".[dev]"     # or: python -m venv .venv && pip install -e ".[dev]"
-.venv/bin/insta-outreach demo --checkpoint               # 4 simulated days in ~1 minute, no Instagram involved
+python3 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"
+insta-outreach scenario --check      # deterministic 10-step scenario; must print IDENTICAL ... 31/31 checks passed
+insta-outreach demo --checkpoint     # 4 simulated days, narrated from the audit trail, no Instagram involved
+insta-outreach browser-demo          # the real browser agent against a local mock of the Instagram UI
 ```
 
 The demo runs the whole system in `AUTONOMOUS` mode against the simulated world:
@@ -59,7 +63,7 @@ The demo runs the whole system in `AUTONOMOUS` mode against the simulated world:
 - interested prospects handed to Rohit;
 - a security **checkpoint** that halts the browser lane until "Rohit" resumes it.
 
-It prints a summary and sample messages.
+It narrates every event as it happens and ends with the commands to inspect the run. Examples: `insta-outreach --config data/demo/settings.yaml explain @sim.smileline.dental`, `audit`, `messages`, `incidents --all`.
 
 Day-to-day use:
 
@@ -98,9 +102,9 @@ All of these are configurable, and can be overridden at runtime with `insta-outr
 
 ## Going live (summary)
 
-The full checklist is in [docs/OPERATIONS.md](docs/OPERATIONS.md).
+Follow **[docs/LIVE_CHECKLIST.md](docs/LIVE_CHECKLIST.md)** step by step. It starts with a sandbox where only your own test account can receive messages. [docs/OPERATIONS.md](docs/OPERATIONS.md) is the day-to-day runbook.
 
-1. Set `environment: live` and create a `CONTROL_API_TOKEN`. In live mode the control plane refuses to work without one.
+1. Set `environment: live` and put a `CONTROL_API_TOKEN` in `.env` (loaded automatically). In live mode the control plane refuses to work without one.
 2. **Browser lane:**
    - set `browser.enabled: true`;
    - run `insta-outreach browser login` and log in yourself, including any 2FA;
@@ -109,7 +113,13 @@ The full checklist is in [docs/OPERATIONS.md](docs/OPERATIONS.md).
    - create a Meta app with Instagram Login;
    - set `IG_ACCESS_TOKEN`, `IG_USER_ID`, `IG_APP_SECRET` and `IG_WEBHOOK_VERIFY_TOKEN`;
    - subscribe the webhook fields `messages`, `message_echoes` and `comments` to `https://<host>/webhooks/instagram`.
-4. Start in `OBSERVE`, then `DRAFT`, then `APPROVAL` for a while. Switch to `AUTONOMOUS` only when the drafts are consistently good. The command asks for explicit confirmation in live mode.
+4. Start in `OBSERVE`, then `DRAFT`, then `APPROVAL` for a while. For the live account, **AUTONOMOUS is refused by code** until `insta-outreach preflight` passes. That requires:
+   - the token;
+   - an outbound lane;
+   - a browser session verified within 7 days;
+   - no halted lane or open incident;
+   - at least 3 human-approved live sends that succeeded;
+   - explicit confirmation.
 
 Claude writes messages and is the constrained fallback for unexpected pages when `ANTHROPIC_API_KEY` is set. Without it, deterministic templates are used and unknown pages stop the lane.
 
@@ -126,6 +136,8 @@ The comment → private-reply path and the API-only reply path are fully within 
 
 ## Documentation
 
+- [docs/VERIFY.md](docs/VERIFY.md): reproduce everything yourself. Expected outputs, where to look, what is and is not proven.
+- [docs/LIVE_CHECKLIST.md](docs/LIVE_CHECKLIST.md): going live with @lemmedeliver, phase by phase, starting with your own test account.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): components, the pipeline, routing, lanes, conversation ownership, idempotency, data model, extension points.
 - [docs/RESEARCH.md](docs/RESEARCH.md): what the Meta APIs can and cannot do (Sept 2026, with sources), and why Playwright plus a constrained Claude resolver was chosen over browser-use or Stagehand.
 - [docs/OPERATIONS.md](docs/OPERATIONS.md): runbook covering setup, modes, approvals, incidents and resuming lanes, human takeover, retention and troubleshooting.

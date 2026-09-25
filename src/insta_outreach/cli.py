@@ -8,13 +8,13 @@ import json
 import logging
 import shutil
 import sys
-from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from insta_outreach.config import Settings, default_config_path, load_settings
+from insta_outreach.config import Settings, default_config_path, load_dotenv, load_settings
 from insta_outreach.domain.enums import (
     ActionStatus,
+    ActionType,
     Channel,
     Environment,
     LeadStatus,
@@ -28,6 +28,10 @@ EXAMPLE_CONFIG = Path(__file__).resolve().parents[2] / "config" / "settings.exam
 
 def _print(data: Any) -> None:
     print(json.dumps(data, indent=2, default=str, ensure_ascii=False))
+
+
+def _lines(lines: list[str]) -> None:
+    print("\n".join(lines))
 
 
 def _app(args: argparse.Namespace) -> Any:
@@ -104,13 +108,14 @@ def cmd_reject(args: argparse.Namespace) -> int:
 
 
 def cmd_leads(args: argparse.Namespace) -> int:
+    from insta_outreach.reporting import leads_view
+
     statuses = [LeadStatus(s.upper()) for s in args.status] if args.status else None
-    for lead in _app(args).control.leads(statuses, args.limit):
-        opportunities = ",".join(o["type"] for o in lead["opportunities"] or [])
-        print(
-            f"{lead['username']:<32} {lead['score']!s:>4} {lead['status']:<16} {opportunities:<40} "
-            f"{(lead['status_reason'] or '')[:70]}"
-        )
+    app = _app(args)
+    if args.json:
+        _print(app.control.leads(statuses, args.limit))
+    else:
+        _lines(leads_view(app, statuses, args.limit))
     return 0
 
 
@@ -120,7 +125,13 @@ def cmd_lead(args: argparse.Namespace) -> int:
 
 
 def cmd_incidents(args: argparse.Namespace) -> int:
-    _print(_app(args).control.incidents(open_only=not args.all))
+    from insta_outreach.reporting import incidents_view
+
+    app = _app(args)
+    if args.json:
+        _print(app.control.incidents(open_only=not args.all))
+    else:
+        _lines(incidents_view(app, include_resolved=args.all))
     return 0
 
 
@@ -136,7 +147,108 @@ def cmd_lane(args: argparse.Namespace) -> int:
 
 
 def cmd_conversations(args: argparse.Namespace) -> int:
-    _print(_app(args).control.conversations(paused_only=args.paused))
+    from insta_outreach.reporting import conversations_view
+
+    app = _app(args)
+    if args.json:
+        _print(app.control.conversations(paused_only=args.paused))
+    else:
+        _lines(conversations_view(app, paused_only=args.paused))
+    return 0
+
+
+def cmd_actions(args: argparse.Namespace) -> int:
+    from insta_outreach.reporting import actions_view
+
+    types = [ActionType(t.upper()) for t in args.type] if args.type else None
+    statuses = [ActionStatus(s.upper()) for s in args.status] if args.status else None
+    _lines(actions_view(_app(args), types, statuses, args.target, args.limit))
+    return 0
+
+
+def cmd_action(args: argparse.Namespace) -> int:
+    from insta_outreach.reporting import action_report
+
+    app = _app(args)
+    if args.json:
+        _print(app.control.action_detail(args.action_id))
+    else:
+        _lines(action_report(app, args.action_id))
+    return 0
+
+
+_GENERATED = {
+    "outreach": [ActionType.SEND_OUTREACH],
+    "followup": [ActionType.SEND_FOLLOW_UP],
+    "reply": [ActionType.SEND_REPLY],
+    "all": [ActionType.SEND_OUTREACH, ActionType.SEND_FOLLOW_UP, ActionType.SEND_REPLY],
+}
+
+
+def cmd_generated(args: argparse.Namespace) -> int:
+    from insta_outreach.reporting import outbound_messages_view
+
+    _lines(outbound_messages_view(_app(args), _GENERATED[args.kind], args.limit))
+    return 0
+
+
+def cmd_messages(args: argparse.Namespace) -> int:
+    from insta_outreach.reporting import messages_view
+
+    _lines(messages_view(_app(args), args.handle, args.limit, args.full))
+    return 0
+
+
+def cmd_suppressions(args: argparse.Namespace) -> int:
+    from insta_outreach.reporting import suppressions_view
+
+    _lines(suppressions_view(_app(args)))
+    return 0
+
+
+def cmd_explain(args: argparse.Namespace) -> int:
+    from insta_outreach.reporting import explain_lead
+
+    _lines(explain_lead(_app(args), args.handle))
+    return 0
+
+
+def cmd_audit(args: argparse.Namespace) -> int:
+    from insta_outreach.reporting import audit_view
+
+    _lines(audit_view(_app(args), args.kind, args.subject, args.limit))
+    return 0
+
+
+def cmd_safety(args: argparse.Namespace) -> int:
+    from insta_outreach.reporting import safety_view
+
+    _lines(safety_view(_app(args)))
+    return 0
+
+
+def cmd_preflight(args: argparse.Namespace) -> int:
+    from insta_outreach.orchestrator.readiness import blocking
+    from insta_outreach.reporting import preflight_view
+
+    app = _app(args)
+    checks = app.control.preflight()
+    if args.json:
+        _print([{"check": c.name, "result": c.mark, "required": c.required, "detail": c.detail} for c in checks])
+    else:
+        _lines(preflight_view(checks))
+    failures = blocking(checks)
+    if app.settings.environment is Environment.LIVE:
+        print(
+            "\nAUTONOMOUS would be REFUSED: " + ", ".join(c.name for c in failures)
+            if failures
+            else "\nall required checks pass: AUTONOMOUS may be enabled explicitly (`insta-outreach mode AUTONOMOUS`)"
+        )
+    return 1 if failures else 0
+
+
+def cmd_add_lead(args: argparse.Namespace) -> int:
+    _print(_app(args).control.add_lead(args.handle, by="cli", campaign_id=args.campaign, note=args.note))
     return 0
 
 
@@ -157,7 +269,7 @@ def cmd_suppress(args: argparse.Namespace) -> int:
 
 
 def cmd_unsuppress(args: argparse.Namespace) -> int:
-    removed = _app(args).control.unsuppress(SuppressionKind(args.kind.upper()), args.value)
+    removed = _app(args).control.unsuppress(SuppressionKind(args.kind.upper()), args.value, by="cli")
     print("removed" if removed else "not found")
     return 0
 
@@ -179,7 +291,19 @@ def cmd_limits(args: argparse.Namespace) -> int:
 
 
 def cmd_tick(args: argparse.Namespace) -> int:
+    from insta_outreach.orchestrator.readiness import blocking
+
     app = _app(args)
+    if app.settings.environment is Environment.LIVE and app.runtime.mode() is OperatingMode.AUTONOMOUS:
+        failures = blocking(app.control.preflight())
+        if failures:
+            print(
+                "refusing: the live account is set to AUTONOMOUS but preflight fails ("
+                + ", ".join(c.name for c in failures)
+                + "). Switch down first: `insta-outreach mode APPROVAL`.",
+                file=sys.stderr,
+            )
+            return 2
 
     async def run() -> None:
         for _ in range(args.n):
@@ -193,12 +317,26 @@ def cmd_tick(args: argparse.Namespace) -> int:
 
 def cmd_run(args: argparse.Namespace) -> int:
     from insta_outreach.app import build_app, describe
+    from insta_outreach.orchestrator.readiness import blocking
+    from insta_outreach.reporting import preflight_view
 
     settings = load_settings(args.config)
     app = build_app(settings)
     print(json.dumps(describe(app) | {"mode": app.runtime.mode().value}, indent=2))
-    if settings.environment is Environment.LIVE and app.runtime.mode() is OperatingMode.AUTONOMOUS:
-        print("WARNING: LIVE + AUTONOMOUS: eligible outreach will be sent automatically within limits.")
+    if settings.environment is Environment.LIVE:
+        checks = app.control.preflight()
+        _lines(preflight_view(checks))
+        failures = blocking(checks)
+        if app.runtime.mode() is OperatingMode.AUTONOMOUS:
+            if failures:
+                print(
+                    "REFUSING TO START: the live account is set to AUTONOMOUS but required preflight checks fail ("
+                    + ", ".join(c.name for c in failures)
+                    + "). Switch down first: `insta-outreach mode APPROVAL`.",
+                    file=sys.stderr,
+                )
+                return 2
+            print("WARNING: LIVE + AUTONOMOUS: eligible outreach will be sent automatically within limits.")
     if args.no_api:
 
         async def loop() -> None:
@@ -244,8 +382,11 @@ def cmd_browser(args: argparse.Namespace) -> int:
 
     settings = load_settings(args.config)
     if args.browser_action == "login":
-        print(asyncio.run(interactive_login(settings)))
-        return 0
+        ok, message = asyncio.run(interactive_login(settings))
+        print(message)
+        if ok:
+            _runtime(settings).record_browser_session("login", by="cli", detail=message)
+        return 0 if ok else 1
     from insta_outreach.llm import AnthropicLLM
     from insta_outreach.storage.db import Database
     from insta_outreach.util.clock import SystemClock
@@ -261,7 +402,20 @@ def cmd_browser(args: argparse.Namespace) -> int:
         )
     )
     _print(report)
-    return 0
+    session_ok = report.get("session", {}).get("state") == "ok"
+    if session_ok:
+        _runtime(settings).record_browser_session("probe", by="cli", detail=str(report["session"].get("url")))
+    return 0 if session_ok else 1
+
+
+def _runtime(settings: Settings) -> Any:
+    from insta_outreach.runtime import RuntimeControl
+    from insta_outreach.storage.db import Database
+    from insta_outreach.util.clock import SystemClock
+
+    db = Database(settings.resolved_database_url)
+    db.create_all()
+    return RuntimeControl(db, settings, SystemClock())
 
 
 def cmd_mock_site(args: argparse.Namespace) -> int:
@@ -276,68 +430,57 @@ def cmd_mock_site(args: argparse.Namespace) -> int:
 
 def cmd_demo(args: argparse.Namespace) -> int:
     """Accelerated multi-day run against the simulated world (no Instagram, no network)."""
-    from insta_outreach.app import build_app
-    from insta_outreach.llm import NullLLM
-    from insta_outreach.util.clock import FakeClock
+    from insta_outreach.verification import run_demo
+
+    asyncio.run(
+        run_demo(
+            Path(args.data_dir),
+            days=args.days,
+            mode=OperatingMode(args.mode.upper()),
+            checkpoint=args.checkpoint,
+            rate_limit=args.rate_limit,
+            human=args.human or None,
+            commenter=args.commenter or None,
+            use_llm=args.use_llm,
+        )
+    )
+    return 0
+
+
+def cmd_scenario(args: argparse.Namespace) -> int:
+    """Deterministic, self-checking scenario; compare with the committed expected transcript."""
+    import difflib
+
+    from insta_outreach.verification import EXPECTED_SCENARIO, normalise, run_scenario
 
     data_dir = Path(args.data_dir)
-    shutil.rmtree(data_dir, ignore_errors=True)
-    settings = Settings(data_dir=data_dir)
-    settings.browser.evidence_dir = data_dir / "evidence"
-    clock = FakeClock()
-    llm = None if args.use_llm else NullLLM()
-    app = build_app(settings, clock=clock, llm=llm)
-    world = app.world
-    assert world is not None
-    app.runtime.set_mode(OperatingMode(args.mode.upper()), "demo")
+    lines, failed = asyncio.run(run_scenario(data_dir, echo=not args.check))
+    actual = normalise(lines, data_dir)
+    if args.out:
+        Path(args.out).write_text("\n".join(actual) + "\n", encoding="utf-8")
+        print(f"transcript written to {args.out}")
+    if args.check:
+        expected = EXPECTED_SCENARIO.read_text(encoding="utf-8").splitlines()
+        diff = list(difflib.unified_diff(expected, actual, "expected_scenario.txt", "actual", lineterm=""))
+        if diff:
+            print("\n".join(diff))
+            print(f"\nDIFFERENT from {EXPECTED_SCENARIO} ({len(failed)} failed check(s))")
+            return 1
+        print(f"IDENTICAL to {EXPECTED_SCENARIO}: {lines[-1]}")
+    return 1 if failed else 0
 
-    async def run() -> None:
-        if args.commenter:
-            world.comment_on_our_post(args.commenter, "This looks amazing! 😍")
-            print(f"day 1: @{args.commenter} commented on one of our posts")
-        for day in range(1, args.days + 1):
-            if day == 2 and args.checkpoint:
-                world.faults.checkpoint_after_browser_ops = world.browser_ops + 2
-            if day == 2 and args.human:
-                world.human_sends(args.human, "Hey! Rohit here personally, following up myself.")
-            for _ in range(66):  # ~11 hours of 10-minute ticks
-                await app.orchestrator.tick()
-                clock.advance(minutes=10)
-            if day == 2 and args.checkpoint:
-                incidents = app.control.incidents()
-                print(f"day {day}: {len(incidents)} open incident(s): " + "; ".join(i["title"] for i in incidents))
-                world.faults.checkpoint_after_browser_ops = None
-                released = app.control.resume_lane(Channel.BROWSER, by="demo", note="checkpoint cleared by Rohit")
-                print(
-                    f"day {day}: Rohit cleared the checkpoint and resumed the browser lane "
-                    f"({released} parked action(s) released)"
-                )
-            clock.advance(hours=13)
-        status = app.control.status()
-        sends = [a for a in app.control.list_actions(limit=500) if a["type"].startswith("SEND")]
-        print("\n=== demo summary ===")
-        _print(
-            {
-                "mode": status["mode"],
-                "leads": status["leads"],
-                "open_incidents": status["open_incidents"],
-                "paused_conversations": status["paused_conversations"],
-                "sends": dict(Counter(f"{a['type']}:{a['status']}" for a in sends)),
-                "sent_via": dict(
-                    Counter(f"{a['capability']}:{a['executed_channel']}" for a in sends if a["status"] == "SUCCEEDED")
-                ),
-            }
-        )
-        print("\nsample first messages:")
-        for action in [a for a in sends if a["type"] == "SEND_OUTREACH" and a["status"] == "SUCCEEDED"][:3]:
-            print(f"  @{action['target_username']}: {action['message']}\n")
-        print("conversations now owned by the human:")
-        for conv in app.control.conversations(paused_only=True):
-            print(f"  @{conv['peer_username']}: {conv['paused_reason']}")
-        await app.close()
 
-    asyncio.run(run())
-    print(f"\ndatabase: {settings.resolved_database_url}")
+def cmd_browser_demo(args: argparse.Namespace) -> int:
+    """The real Playwright agent against the local mock Instagram site (needs Chromium)."""
+    from insta_outreach.verification import run_browser_demo
+
+    try:
+        asyncio.run(run_browser_demo(Path(args.data_dir), headed=args.headed))
+    except Exception as exc:  # most likely: no Chromium installed for Playwright
+        if "Executable doesn't exist" in str(exc) or "playwright install" in str(exc):
+            print("Chromium for Playwright is missing: run `.venv/bin/playwright install chromium`", file=sys.stderr)
+            return 2
+        raise
     return 0
 
 
@@ -370,15 +513,25 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("tick", help="run N orchestrator ticks now")
     p.add_argument("-n", type=int, default=1)
     p.set_defaults(fn=cmd_tick)
-    p = sub.add_parser("demo", help="accelerated multi-day simulation (safe: no Instagram)")
+    p = sub.add_parser("demo", help="accelerated multi-day simulation, narrated (safe: no Instagram)")
     p.add_argument("--days", type=int, default=4)
     p.add_argument("--mode", default="AUTONOMOUS")
     p.add_argument("--checkpoint", action="store_true", help="inject a security checkpoint on day 2")
+    p.add_argument("--rate-limit", action="store_true", help="inject an Instagram rate limit on day 3")
     p.add_argument("--human", default="sim.the.brew.room", help="prospect Rohit messages manually on day 2")
     p.add_argument("--commenter", default="sim.smileline.dental", help="account that comments on our post on day 1")
     p.add_argument("--use-llm", action="store_true", help="use Claude for messages if credentials exist")
     p.add_argument("--data-dir", default="data/demo")
     p.set_defaults(fn=cmd_demo)
+    p = sub.add_parser("scenario", help="deterministic self-checking scenario (compare with the expected transcript)")
+    p.add_argument("--data-dir", default="data/scenario")
+    p.add_argument("--check", action="store_true", help="diff against docs/verification/expected_scenario.txt")
+    p.add_argument("--out", help="also write the transcript to this file")
+    p.set_defaults(fn=cmd_scenario)
+    p = sub.add_parser("browser-demo", help="real Playwright agent against the local mock Instagram site")
+    p.add_argument("--data-dir", default="data/browser-demo")
+    p.add_argument("--headed", action="store_true", help="show the browser window")
+    p.set_defaults(fn=cmd_browser_demo)
 
     p = sub.add_parser("approvals", help="list outreach awaiting approval")
     p.add_argument("--limit", type=int, default=50)
@@ -392,23 +545,65 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reason", default="")
     p.add_argument("--redraft", action="store_true", help="put the lead back for a fresh draft")
     p.set_defaults(fn=cmd_reject)
-    p = sub.add_parser("leads", help="list leads")
-    p.add_argument("--status", action="append")
-    p.add_argument("--limit", type=int, default=100)
+    p = sub.add_parser("leads", help="list leads with score, status and why")
+    p.add_argument("--status", action="append", help="e.g. QUALIFIED, DISQUALIFIED, CONTACTED (repeatable)")
+    p.add_argument("--limit", type=int, default=200)
+    p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_leads)
+    p = sub.add_parser("add-lead", help="add a handle by hand (goes through the full pipeline)")
+    p.add_argument("handle")
+    p.add_argument("--campaign")
+    p.add_argument("--note", default="")
+    p.set_defaults(fn=cmd_add_lead)
+    p = sub.add_parser("explain", help="everything known and decided about one lead, in order")
+    p.add_argument("handle")
+    p.set_defaults(fn=cmd_explain)
+    p = sub.add_parser("actions", help="action log (discovery, inspection, sends...) with status and reason")
+    p.add_argument("--type", action="append", help="DISCOVER, INSPECT_PROFILE, SEND_OUTREACH, SEND_FOLLOW_UP, ...")
+    p.add_argument("--status", action="append", help="e.g. SUCCEEDED, BLOCKED, PENDING_APPROVAL (repeatable)")
+    p.add_argument("--target", help="@handle")
+    p.add_argument("--limit", type=int, default=100)
+    p.set_defaults(fn=cmd_actions)
+    p = sub.add_parser("action", help="one action: text, gate decisions, attempts, evidence")
+    p.add_argument("action_id")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=cmd_action)
+    p = sub.add_parser("generated", help="generated messages and what happened to each")
+    p.add_argument("kind", nargs="?", default="outreach", choices=sorted(_GENERATED))
+    p.add_argument("--limit", type=int, default=100)
+    p.set_defaults(fn=cmd_generated)
+    p = sub.add_parser("messages", help="message log: sent DMs, replies, Rohit's own messages")
+    p.add_argument("handle", nargs="?")
+    p.add_argument("--limit", type=int, default=200)
+    p.add_argument("--full", action="store_true", help="do not shorten message text")
+    p.set_defaults(fn=cmd_messages)
+    p = sub.add_parser("suppressions", help="everyone who must never be contacted")
+    p.set_defaults(fn=cmd_suppressions)
+    p = sub.add_parser("audit", help="audit trail: operator changes and system decisions")
+    p.add_argument("--kind", help="event prefix, e.g. mode, message.sent, lane, incident, conversation")
+    p.add_argument("--subject", help="e.g. @handle or lane:BROWSER")
+    p.add_argument("--limit", type=int, default=200)
+    p.set_defaults(fn=cmd_audit)
+    p = sub.add_parser("safety", help="every safety limit and stop behaviour currently in force")
+    p.set_defaults(fn=cmd_safety)
+    p = sub.add_parser("preflight", help="live readiness checks (exit 1 while AUTONOMOUS would be refused)")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=cmd_preflight)
     p = sub.add_parser("lead", help="lead detail (id or username)")
     p.add_argument("ref")
     p.set_defaults(fn=cmd_lead)
-    p = sub.add_parser("incidents", help="barriers/anomalies needing a human")
-    p.add_argument("--all", action="store_true")
+    p = sub.add_parser("incidents", help="barriers/anomalies needing a human (with evidence paths)")
+    p.add_argument("--all", action="store_true", help="include resolved incidents")
+    p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_incidents)
     p = sub.add_parser("lane", help="resume or halt an execution lane")
     p.add_argument("lane_action", choices=["resume", "halt"])
     p.add_argument("channel", choices=["api", "browser", "API", "BROWSER"])
     p.add_argument("--note", default="")
     p.set_defaults(fn=cmd_lane)
-    p = sub.add_parser("conversations", help="list conversations")
-    p.add_argument("--paused", action="store_true")
+    p = sub.add_parser("conversations", help="conversations and who owns them (human takeover)")
+    p.add_argument("--paused", action="store_true", help="only conversations automation must not touch")
+    p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_conversations)
     p = sub.add_parser("claim", help="take a conversation over manually (pauses automation)")
     p.add_argument("ref", help="conversation id or @username")
@@ -442,12 +637,22 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    load_dotenv()  # secrets from ./.env (never committed); real environment variables win
+    chatty = args.command in ("run", "serve", "tick", "browser", "init")
+    narrated = args.command in ("demo", "scenario", "browser-demo")  # events are printed as narration
     logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+        level=logging.DEBUG
+        if args.verbose
+        else logging.INFO
+        if chatty
+        else logging.ERROR
+        if narrated
+        else logging.WARNING,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     try:
         return int(args.fn(args) or 0)
-    except ControlError as exc:
+    except (ControlError, FileNotFoundError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 

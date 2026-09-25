@@ -352,6 +352,17 @@ class ControlApiSettings(BaseModel):
     token: SecretStr | None = None
 
 
+class RolloutSettings(BaseModel):
+    """Guards for going live (docs/LIVE_CHECKLIST.md)."""
+
+    # Non-empty: outbound messages may only go to these handles (first live tests on your own account).
+    allowed_targets: list[str] = Field(default_factory=list)
+    # AUTONOMOUS in the live environment is refused until this many human-approved live sends succeeded...
+    min_approved_sends_for_autonomous: int = 3
+    # ...and the browser session was proven to work (login, probe or a successful operation) this recently.
+    browser_session_max_age_days: int = 7
+
+
 class RetentionSettings(BaseModel):
     """Data minimisation: raw webhook payloads can contain unrelated private DMs."""
 
@@ -393,6 +404,7 @@ class Settings(BaseModel):
     control_api: ControlApiSettings = Field(default_factory=ControlApiSettings)
     notifications: NotificationSettings = Field(default_factory=NotificationSettings)
     retention: RetentionSettings = Field(default_factory=RetentionSettings)
+    rollout: RolloutSettings = Field(default_factory=RolloutSettings)
     simulation: SimulationSettings = Field(default_factory=SimulationSettings)
 
     @property
@@ -439,12 +451,38 @@ def apply_env_overrides(data: dict[str, Any], environ: dict[str, str] | None = N
     return data
 
 
+def load_dotenv(path: Path = Path(".env")) -> list[str]:
+    """Load ``KEY=VALUE`` lines from ``.env`` into the environment.
+
+    Variables already set in the environment win. Returns the names loaded
+    (never the values). Comments, blank lines and ``export`` prefixes are fine.
+    """
+    if not path.is_file():
+        return []
+    loaded = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.removeprefix("export ").partition("=")
+        key, value = key.strip(), value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+            value = value[1:-1]
+        if key and value and key not in os.environ:
+            os.environ[key] = value
+            loaded.append(key)
+    return loaded
+
+
 def default_config_path() -> Path:
     return Path(os.environ.get("INSTA_OUTREACH_CONFIG", "config/settings.yaml"))
 
 
 def load_settings(path: Path | str | None = None, environ: dict[str, str] | None = None) -> Settings:
     config_path = Path(path) if path else default_config_path()
+    if path and not config_path.exists():
+        # An explicit path that does not exist is a typo, not "use the defaults".
+        raise FileNotFoundError(f"config file not found: {config_path}")
     data: dict[str, Any] = {}
     if config_path.exists():
         loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))

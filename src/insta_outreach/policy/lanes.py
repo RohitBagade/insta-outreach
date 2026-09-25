@@ -23,6 +23,7 @@ from insta_outreach.domain.enums import (
     LaneState,
 )
 from insta_outreach.domain.models import ExecutionResult
+from insta_outreach.policy.audit import audit
 from insta_outreach.policy.incidents import IncidentService
 from insta_outreach.storage.models import Action, Lane
 from insta_outreach.util.clock import Clock, utc
@@ -171,6 +172,19 @@ class LaneService:
                 evidence=[e.model_dump(mode="json") for e in result.evidence],
             )
             lane.incident_id = incident.id
+            audit(
+                session,
+                now,
+                actor="system",
+                kind="lane.cooldown",
+                subject=f"lane:{result.channel.value}",
+                summary=f"{result.channel.value} lane cooling down until {lane.until:%Y-%m-%d %H:%M} UTC"
+                f" ({lane.reason})",
+                until=lane.until,
+                incident_id=incident.id,
+                action_id=action_id,
+                rate_limit_events_24h=len(events),
+            )
             return LaneTransition(account_id, result.channel, LaneState.COOLDOWN, lane.reason, incident.id)
 
         # A profile without a message option is normal once; on several profiles in a
@@ -219,6 +233,19 @@ class LaneService:
         lane.incident_id = incident.id
         if already:
             return None
+        audit(
+            session,
+            self._clock.now(),
+            actor="system",
+            kind="lane.halted",
+            subject=f"lane:{lane.channel.value}",
+            summary=f"{lane.channel.value} lane HALTED until a human resumes it: {title}",
+            status=result.status,
+            code=result.code,
+            page_url=result.page_url,
+            incident_id=incident.id,
+            action_id=action_id,
+        )
         return LaneTransition(lane.account_id, lane.channel, LaneState.HALTED, lane.reason, incident.id)
 
     # -- human controls --------------------------------------------------------

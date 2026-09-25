@@ -58,7 +58,8 @@ from insta_outreach.intelligence.dedupe import register_and_find_duplicate
 from insta_outreach.intelligence.website import WebsiteCheck, WebsiteChecker
 from insta_outreach.orchestrator.actions import ActionService
 from insta_outreach.personalization.composer import CompositionFailed, MessageComposer, keyword_intent
-from insta_outreach.policy.gate import AUTO_APPROVER, EligibilityGate
+from insta_outreach.policy.audit import audit
+from insta_outreach.policy.gate import AUTO_APPROVER, EligibilityGate, sandbox_targets
 from insta_outreach.policy.incidents import IncidentService
 from insta_outreach.policy.suppression import add_suppression
 from insta_outreach.runtime import RuntimeControl
@@ -115,6 +116,23 @@ def status_for_new_outbound(
             return ActionStatus.PENDING_APPROVAL, None
         return ActionStatus.APPROVED, AUTO_APPROVER
     raise ValueError("OBSERVE mode never prepares outbound actions")
+
+
+_QUEUE_VERB = {
+    ActionStatus.DRAFTED: "drafted (DRAFT mode: never sent)",
+    ActionStatus.PENDING_APPROVAL: "queued for human approval",
+    ActionStatus.APPROVED: "auto-approved; sends when every gate check passes",
+}
+
+
+def _outbound_label(action_type: ActionType, capability: Capability, followup_number: int) -> str:
+    if action_type is ActionType.SEND_FOLLOW_UP:
+        return f"follow-up #{followup_number}"
+    if action_type is ActionType.SEND_REPLY:
+        return "reply"
+    if capability is Capability.PRIVATE_REPLY:
+        return "first message (private reply to their comment)"
+    return "first message"
 
 
 class Pipeline:
@@ -516,12 +534,11 @@ class Pipeline:
             # Lead status drives planning: QUALIFIED means "no outreach in flight". Every
             # outcome of an outreach action moves the lead out of QUALIFIED, except
             # expiry / reject-and-redraft which deliberately put it back.
-            leads = session.scalars(
-                select(Lead)
-                .where(Lead.status == LeadStatus.QUALIFIED)
-                .order_by(Lead.score.desc(), Lead.id)
-                .limit(limit)
-            ).all()
+            query = select(Lead).where(Lead.status == LeadStatus.QUALIFIED)
+            sandbox = sandbox_targets(self.settings)
+            if sandbox:  # others stay QUALIFIED and are drafted once the sandbox is lifted
+                query = query.where(Lead.username.in_(sorted(sandbox)))
+            leads = session.scalars(query.order_by(Lead.score.desc(), Lead.id).limit(limit)).all()
             can_private_reply = bool(self.s.executor.candidate_channels(Capability.PRIVATE_REPLY))
             batch = []
             for lead in leads:
@@ -648,13 +665,39 @@ class Pipeline:
                 return 0
             decision = self.s.gate.preview(session, action, self.s.executor.candidate_channels(capability), limits)
             action.gate = {"proposal": decision.as_dict()}
+            label = _outbound_label(action_type, capability, followup_number)
+            target = f"@{action.target_username}"
             if decision.outcome is GateOutcome.DENY:
                 action.status, action.status_reason = ActionStatus.BLOCKED, "; ".join(decision.reasons)
                 if lead is not None and action_type is ActionType.SEND_OUTREACH:
                     self._lead_after_block(lead, decision.reasons)
+                audit(
+                    session,
+                    self._now(),
+                    actor="system",
+                    kind="action.blocked",
+                    subject=target,
+                    summary=f"{label} to {target} BLOCKED before reaching the queue: {'; '.join(decision.reasons)}",
+                    action_id=action.id,
+                    reasons=decision.reasons,
+                )
                 return 0
             if lead is not None and action_type is ActionType.SEND_OUTREACH:
                 lead.status = LeadStatus.OUTREACH_PENDING
+            audit(
+                session,
+                self._now(),
+                actor="system",
+                kind="action.proposed",
+                subject=target,
+                summary=f"{label} to {target} {_QUEUE_VERB[status]} ({composer} text; mode {mode.value})",
+                action_id=action.id,
+                status=status,
+                capability=capability,
+                composer=composer,
+                facts_used=facts_used,
+                opportunity=(extra or {}).get("opportunity"),
+            )
             return 1
 
     @staticmethod
@@ -680,18 +723,17 @@ class Pipeline:
         days = limits.followup_after_days
         created = 0
         with self.s.db.session() as session:
-            leads = session.scalars(
-                select(Lead)
-                .where(
-                    Lead.status == LeadStatus.CONTACTED,
-                    Lead.replied_at.is_(None),
-                    Lead.followups_sent < limits.max_followups_per_lead,
-                    Lead.followups_blocked_reason.is_(None),
-                    Lead.last_outbound_at.is_not(None),
-                )
-                .order_by(Lead.last_outbound_at)
-                .limit(limit * 4)
-            ).all()
+            query = select(Lead).where(
+                Lead.status == LeadStatus.CONTACTED,
+                Lead.replied_at.is_(None),
+                Lead.followups_sent < limits.max_followups_per_lead,
+                Lead.followups_blocked_reason.is_(None),
+                Lead.last_outbound_at.is_not(None),
+            )
+            sandbox = sandbox_targets(self.settings)
+            if sandbox:
+                query = query.where(Lead.username.in_(sorted(sandbox)))
+            leads = session.scalars(query.order_by(Lead.last_outbound_at).limit(limit * 4)).all()
             due = []
             for lead in leads:
                 number = lead.followups_sent + 1
@@ -945,10 +987,23 @@ class Pipeline:
                 for kind, value in keys:
                     if value:
                         with contextlib.suppress(ValueError):  # unparseable identifier: nothing to key on
-                            add_suppression(session, kind, value, reason, source)
+                            add_suppression(session, kind, value, reason, source, self._now())
                 self.s.ownership.cancel_open_outbound(session, conv, f"prospect replied {intent.value}")
                 if lead is not None:
                     lead.status, lead.status_reason = LeadStatus.CLOSED, f"{intent.value} ({why})"
+                audit(
+                    session,
+                    self._now(),
+                    actor="system",
+                    kind="reply.handled",
+                    subject=who,
+                    summary=f"reply classified {intent.value} ({why}) -> suppressed: "
+                    + ", ".join(f"{kind.value}={value}" for kind, value in keys if value),
+                    conversation_id=conv.id,
+                    intent=intent,
+                    reply=text[:300],
+                    suppressed=[f"{kind.value}:{value}" for kind, value in keys if value],
+                )
                 self.s.incidents.notify_later(
                     f"{who} replied {intent.value}; suppressed",
                     text[:300],
@@ -959,6 +1014,17 @@ class Pipeline:
             if intent is ReplyIntent.NEUTRAL:
                 self.s.incidents.notify_later(
                     f"New reply from {who}", text[:300], IncidentSeverity.INFO, conversation_id=conv.id
+                )
+                audit(
+                    session,
+                    self._now(),
+                    actor="system",
+                    kind="reply.handled",
+                    subject=who,
+                    summary=f"reply classified NEUTRAL ({why}) -> Rohit notified, nothing sent",
+                    conversation_id=conv.id,
+                    intent=intent,
+                    reply=text[:300],
                 )
                 return
             facts = dict((lead.signals or {}).get("facts", {})) if lead else {}
@@ -979,6 +1045,19 @@ class Pipeline:
                 if conv is None:
                     return
                 self.s.ownership.take_over_by_human(session, conv, f"handed off: prospect replied ({intent.value})")
+                audit(
+                    session,
+                    self._now(),
+                    actor="system",
+                    kind="reply.handled",
+                    subject=f"@{conv.peer_username}",
+                    summary=f"reply classified {intent.value} ({why}) -> handed off to Rohit"
+                    + (" with a suggested reply" if suggestion else ""),
+                    conversation_id=conv.id,
+                    intent=intent,
+                    reply=text[:300],
+                    suggestion=suggestion,
+                )
                 self.s.incidents.notify_later(
                     f"Warm lead: @{conv.peer_username} replied ({intent.value}) — over to you",
                     f"They wrote: {text[:300]}" + (f"\nSuggested reply: {suggestion}" if suggestion else ""),

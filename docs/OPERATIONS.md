@@ -6,13 +6,15 @@
 uv venv --python 3.11 && uv pip install -e ".[dev]"
 .venv/bin/playwright install chromium        # skip if a Chromium is already provided (PLAYWRIGHT_BROWSERS_PATH)
 .venv/bin/insta-outreach init                 # config/settings.yaml (local, OBSERVE) + data dirs + database
-cp .env.example .env                          # fill in secrets; never commit .env
+cp .env.example .env                          # fill in secrets; loaded automatically; never commit .env
 ```
+
+Before anything live, run through **[VERIFY.md](VERIFY.md)** (simulation, reproducible) and then **[LIVE_CHECKLIST.md](LIVE_CHECKLIST.md)** (phase by phase, starting with a sandbox on your own test account).
 
 **Configuration** is read from three places:
 
 - `config/settings.yaml`; the path can be overridden with `--config` or `INSTA_OUTREACH_CONFIG`.
-- **Secrets as environment variables:** `IG_ACCESS_TOKEN`, `IG_USER_ID`, `IG_APP_SECRET`, `IG_WEBHOOK_VERIFY_TOKEN`, `CONTROL_API_TOKEN`, `NOTIFY_WEBHOOK_URL`, `ANTHROPIC_API_KEY`.
+- **Secrets as environment variables:** `IG_ACCESS_TOKEN`, `IG_USER_ID`, `IG_APP_SECRET`, `IG_WEBHOOK_VERIFY_TOKEN`, `CONTROL_API_TOKEN`, `NOTIFY_WEBHOOK_URL`, `ANTHROPIC_API_KEY`. A `.env` file in the working directory is loaded automatically; variables already set in the shell win.
 - **Overrides of any setting:** `INSTA__SECTION__KEY=value`, e.g. `INSTA__LIMITS__OUTREACH_PER_DAY=10`.
 
 The **runtime mode, the pause switch and limit overrides** are stored in the database. They change without a restart, from the CLI or the console, and every change is recorded with who made it.
@@ -23,7 +25,14 @@ The **runtime mode, the pause switch and limit overrides** are stored in the dat
 2. `environment: live`, mode **OBSERVE**. The live database is separate (`data/live.db`) and simulated leads can never leak into it. Discovery and analysis run on the real account; check `insta-outreach leads` for sensible qualification.
 3. **DRAFT**. Messages are written but never sent. Read them in the console or with `insta-outreach approvals`.
 4. **APPROVAL**. You approve each message (optionally edited) or reject it (`--redraft` for a fresh draft). Stay here until the drafts are consistently good.
-5. **AUTONOMOUS**. `insta-outreach mode AUTONOMOUS` asks for confirmation in live mode. Sends happen automatically inside every limit. Replies from prospects still wait for approval unless `replies.autonomous: true`; interested or question replies are handed to you.
+5. **AUTONOMOUS**. For the live account this is **refused by code** until `insta-outreach preflight` passes:
+   - control token;
+   - an outbound lane;
+   - a browser session verified within 7 days;
+   - no halted lane or open incident;
+   - at least 3 human-approved live sends that succeeded.
+
+   Then `insta-outreach mode AUTONOMOUS` still asks for confirmation. `run` and `tick` refuse to start if the stored mode is AUTONOMOUS while preflight fails. Sends happen automatically inside every limit. Replies from prospects still wait for approval unless `replies.autonomous: true`; interested or question replies are handed to you.
 
 Going back down is always safe. Switching from AUTONOMOUS to APPROVAL moves already auto-approved messages back into the approval queue.
 
@@ -68,7 +77,16 @@ Why this lane matters:
 |---|---|---|
 | Overview: mode, lanes, counters, incidents | `insta-outreach status` | Status panel |
 | Review / approve / edit / reject drafts | `approvals`, `approve <id> [--message "..."]`, `reject <id> --reason ... [--redraft]` | Approval queue |
-| Leads and why they (don't) qualify | `leads [--status QUALIFIED]`, `lead @handle` | Leads |
+| Leads and why they (don't) qualify | `leads [--status QUALIFIED]`, `explain @handle` | Leads |
+| Every decision about one lead, in order | `explain @handle` | – |
+| Generated messages and their fate | `generated [outreach\|followup\|reply\|all]` | Approval queue |
+| Message log (sent, received, Rohit's own) | `messages [@handle]` | Conversations |
+| One action: gate decisions, attempts, evidence | `actions [--type …] [--status …]`, `action <id>` | – |
+| Audit trail | `audit [--kind mode\|message.sent\|lane\|…] [--subject @handle]` | – |
+| Limits and stop behaviour in force | `safety` | – |
+| Live readiness (AUTONOMOUS prerequisites) | `preflight` | – |
+| Add a handle by hand (full pipeline) | `add-lead @handle [--note …]` | – |
+| Never-contact list | `suppressions` | – |
 | Take over a conversation | `claim @handle` | Conversations → Claim |
 | Hand a conversation back | `release @handle` | Conversations → Release |
 | Never contact someone | `suppress @handle` (or `--kind DOMAIN/PHONE/EMAIL`) | – |
@@ -107,7 +125,8 @@ A **lane** is one channel (API or browser) of the account. When Instagram shows 
   - for leads: observed public profile facts, analysis, sources;
   - conversations with leads;
   - every action and attempt, with results;
-  - suppressions and incidents.
+  - suppressions and incidents;
+  - the append-only audit trail (`audit_events`): who changed what, and every consequential system decision.
 - **Retention:** raw webhook payloads are deleted after `retention.webhook_payload_days` (7). Evidence folders are deleted after `retention.evidence_days` (30), except those cited by an open incident. Usage-ledger rows are deleted after 8 days.
 - **Never commit** `data/`, `.env` or `config/settings.yaml`; `.gitignore` covers them.
 

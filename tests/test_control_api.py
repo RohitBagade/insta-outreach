@@ -60,13 +60,18 @@ def test_webhook_verification_and_signatures(make_app, settings) -> None:
     )
 
 
-def test_live_autonomous_needs_explicit_confirmation(make_app, settings) -> None:
+def test_live_autonomous_needs_confirmation_and_a_passing_preflight(make_app, settings) -> None:
     settings = secure(settings)
     settings.environment = Environment.LIVE
     client = client_for(make_app(settings=settings, adapters={}))
     refused = client.post("/api/mode", json={"mode": "AUTONOMOUS"}, headers=AUTH)
     assert refused.status_code == 400 and "confirmation" in refused.json()["detail"]
-    assert client.post("/api/mode", json={"mode": "AUTONOMOUS", "confirm": True}, headers=AUTH).status_code == 200
+    # Confirmation alone is not enough: no outbound lane, no approved live sends yet.
+    refused = client.post("/api/mode", json={"mode": "AUTONOMOUS", "confirm": True}, headers=AUTH)
+    assert refused.status_code == 400 and "send_lane" in refused.json()["detail"]
+    checks = {c["check"]: c["result"] for c in client.get("/api/preflight", headers=AUTH).json()}
+    assert checks["send_lane"] == "FAIL" and checks["control_token"] == "PASS"
+    assert client.post("/api/mode", json={"mode": "APPROVAL"}, headers=AUTH).status_code == 200
 
 
 async def test_approval_endpoints_and_conversation_claim(make_app, settings, clock) -> None:

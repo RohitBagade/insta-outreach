@@ -188,6 +188,30 @@ def create_api(app: App, run_orchestrator: bool = False) -> FastAPI:
     async def lead(ref: str, _: str = Depends(require_token)) -> dict[str, Any]:
         return guarded(lambda: app.control.lead_detail(ref))
 
+    @api.post("/api/leads")
+    async def add_lead(body: dict[str, Any] = Body(...), who: str = Depends(require_token)) -> dict[str, Any]:
+        return guarded(
+            lambda: app.control.add_lead(
+                str(body.get("username", "")),
+                by=who,
+                campaign_id=body.get("campaign_id"),
+                note=str(body.get("note", "")),
+            )
+        )
+
+    @api.get("/api/preflight")
+    async def preflight(_: str = Depends(require_token)) -> list[dict[str, Any]]:
+        return [
+            {"check": c.name, "result": c.mark, "required": c.required, "detail": c.detail}
+            for c in app.control.preflight()
+        ]
+
+    @api.get("/api/audit")
+    def audit_log(
+        kind: str | None = None, subject: str | None = None, limit: int = 200, _: str = Depends(require_token)
+    ) -> list[dict[str, Any]]:
+        return app.control.audit_events(kind, subject, limit)
+
     @api.get("/api/incidents")
     async def incidents(all: bool = False, _: str = Depends(require_token)) -> list[dict[str, Any]]:
         return app.control.incidents(open_only=not all)
@@ -235,8 +259,8 @@ def create_api(app: App, run_orchestrator: bool = False) -> FastAPI:
         return {"created": created}
 
     @api.delete("/api/suppressions/{kind}/{value}")
-    async def unsuppress(kind: str, value: str, _: str = Depends(require_token)) -> dict[str, Any]:
-        return {"removed": app.control.unsuppress(SuppressionKind(kind.upper()), value)}
+    async def unsuppress(kind: str, value: str, who: str = Depends(require_token)) -> dict[str, Any]:
+        return {"removed": app.control.unsuppress(SuppressionKind(kind.upper()), value, by=who)}
 
     @api.post("/api/tick")
     async def tick(_: str = Depends(require_token)) -> dict[str, Any]:

@@ -63,6 +63,8 @@ class GateFacts:
     followups_blocked: str | None = None
     followup_number: int = 0
     last_outbound_at: datetime | None = None
+    # rollout sandbox (rollout.allowed_targets)
+    target_allowed: bool = True
     # conversation
     conversation_paused: bool = False
     conversation_owner: ConversationOwner = ConversationOwner.NONE
@@ -127,6 +129,8 @@ def evaluate(f: GateFacts) -> GateDecision:
             return GateDecision(GateOutcome.DEFER, ["mode APPROVAL requires a human approval"], requires_approval=True)
 
         # -- permanent denials ---------------------------------------------
+        if not f.target_allowed:
+            return _deny("sandbox: target is not listed in rollout.allowed_targets")
         if f.suppressed:
             return _deny(f.suppressed)
         if f.conversation_paused or f.conversation_owner is ConversationOwner.HUMAN:
@@ -212,6 +216,11 @@ def evaluate(f: GateFacts) -> GateDecision:
     return GateDecision(GateOutcome.ALLOW, ["all checks passed"])
 
 
+def sandbox_targets(settings: Settings) -> set[str]:
+    """Handles outbound messages are restricted to (empty: no restriction)."""
+    return {t.strip().lstrip("@").lower() for t in settings.rollout.allowed_targets if t.strip()}
+
+
 class EligibilityGate:
     """Builds :class:`GateFacts` from the database and evaluates them."""
 
@@ -288,6 +297,9 @@ class EligibilityGate:
             send_jitter_seconds=float(params.get("_send_jitter", 0.0)),
         )
 
+        allowed = sandbox_targets(self._settings)
+        if allowed and action.type.is_outbound:
+            facts.target_allowed = (action.target_username or "").lower() in allowed
         lead = session.get(Lead, action.lead_id) if action.lead_id else None
         conversation = session.get(Conversation, action.conversation_id) if action.conversation_id else None
         if lead is not None:

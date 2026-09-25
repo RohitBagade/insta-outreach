@@ -136,6 +136,11 @@ notifications:
   # webhook_url: https://your-n8n.example/webhook/insta-outreach   (or NOTIFY_WEBHOOK_URL)
   min_severity: WARNING
 
+rollout:                     # guards for going live (docs/LIVE_CHECKLIST.md)
+  allowed_targets: []        # e.g. [your_test_account]: outbound ONLY to these handles while testing live
+  min_approved_sends_for_autonomous: 3   # AUTONOMOUS (live) is refused before this many approved sends succeeded
+  browser_session_max_age_days: 7        # ...and without a browser session verified this recently
+
 retention:
   webhook_payload_days: 7    # raw webhook payloads (may include unrelated DMs) are deleted after this
   evidence_days: 30          # screenshots/traces; folders cited by open incidents are kept

@@ -28,6 +28,7 @@ from insta_outreach.domain.enums import (
     SenderKind,
 )
 from insta_outreach.domain.models import ThreadSnapshot, text_sha256
+from insta_outreach.policy.audit import audit
 from insta_outreach.storage.models import Action, Conversation, Lead, Message
 from insta_outreach.util.clock import Clock
 
@@ -254,7 +255,20 @@ class OwnershipService:
             if lead is not None and lead.status not in (LeadStatus.CLOSED,):
                 lead.status = LeadStatus.HANDED_OFF
                 lead.status_reason = reason[:500]
-        return self.cancel_open_outbound(session, conv, f"cancelled: {reason}")
+        cancelled = self.cancel_open_outbound(session, conv, f"cancelled: {reason}")
+        audit(
+            session,
+            now,
+            actor="system",
+            kind="conversation.human_owned",
+            subject=f"@{conv.peer_username or conv.peer_igsid}",
+            summary=f"owned by the human, automation paused: {reason}; {cancelled} open action(s) cancelled",
+            conversation_id=conv.id,
+            reason=reason,
+            cancelled_actions=cancelled,
+            pause_until=conv.pause_until,
+        )
+        return cancelled
 
     def release_to_automation(self, session: Session, conv: Conversation, by: str) -> None:
         conv.owner = ConversationOwner.NONE
@@ -263,6 +277,15 @@ class OwnershipService:
         conv.pause_until = None
         conv.lock_token = None
         conv.lock_expires_at = None
+        audit(
+            session,
+            self._clock.now(),
+            actor=by,
+            kind="conversation.released",
+            subject=f"@{conv.peer_username or conv.peer_igsid}",
+            summary=f"conversation handed back to automation by {by}",
+            conversation_id=conv.id,
+        )
 
     @staticmethod
     def cancel_open_outbound(session: Session, conv: Conversation, reason: str) -> int:

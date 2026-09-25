@@ -20,12 +20,15 @@ from insta_outreach.domain.enums import (
 )
 from insta_outreach.domain.models import text_sha256
 from insta_outreach.orchestrator.pipeline import Services
+from insta_outreach.orchestrator.readiness import Check, blocking, live_readiness
 from insta_outreach.personalization.validator import MessageValidator
+from insta_outreach.policy.audit import audit
 from insta_outreach.policy.lanes import LaneService
 from insta_outreach.policy.suppression import add_suppression, remove_suppression
 from insta_outreach.storage.models import (
     Action,
     ActionAttempt,
+    AuditEvent,
     Conversation,
     Incident,
     Lead,
@@ -34,10 +37,15 @@ from insta_outreach.storage.models import (
     Suppression,
 )
 from insta_outreach.util.clock import local_day_start
+from insta_outreach.util.text import InvalidUsername, canonical_username
 
 
 class ControlError(ValueError):
     pass
+
+
+def _suppression_subject(kind: SuppressionKind, value: str) -> str:
+    return f"@{value.lstrip('@').lower()}" if kind is SuppressionKind.USERNAME else f"{kind.value}:{value}"
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -202,10 +210,51 @@ class ControlService:
 
     # -- mode / pause ------------------------------------------------------------
     def set_mode(self, mode: OperatingMode, by: str, confirm: bool = False) -> dict[str, str]:
-        if mode is OperatingMode.AUTONOMOUS and self.s.settings.environment is Environment.LIVE and not confirm:
-            raise ControlError("switching the LIVE account to AUTONOMOUS requires explicit confirmation")
+        if mode is OperatingMode.AUTONOMOUS and self.s.settings.environment is Environment.LIVE:
+            if not confirm:
+                raise ControlError("switching the LIVE account to AUTONOMOUS requires explicit confirmation")
+            failures = blocking(self.preflight())
+            if failures:
+                with self.s.db.session() as session:
+                    audit(
+                        session,
+                        self.s.clock.now(),
+                        actor=by,
+                        kind="mode.refused",
+                        subject="runtime",
+                        summary="AUTONOMOUS refused for the live account: " + ", ".join(c.name for c in failures),
+                        failing={c.name: c.detail for c in failures},
+                    )
+                raise ControlError(
+                    "AUTONOMOUS refused for the live account; failing preflight checks: "
+                    + "; ".join(f"{c.name}: {c.detail}" for c in failures)
+                )
         previous = self.s.runtime.set_mode(mode, by)
         return {"previous": previous.value, "mode": mode.value}
+
+    def preflight(self) -> list[Check]:
+        return live_readiness(self.s, self._lanes)
+
+    def audit_events(
+        self, kind: str | None = None, subject: str | None = None, limit: int = 200
+    ) -> list[dict[str, Any]]:
+        with self.s.db.session() as session:
+            query = select(AuditEvent).order_by(AuditEvent.at.desc(), AuditEvent.id.desc()).limit(limit)
+            if kind:
+                query = query.where(AuditEvent.kind.startswith(kind))
+            if subject:
+                query = query.where(AuditEvent.subject == subject)
+            return [
+                {
+                    "at": _iso(e.at),
+                    "actor": e.actor,
+                    "kind": e.kind,
+                    "subject": e.subject,
+                    "summary": e.summary,
+                    "detail": e.detail,
+                }
+                for e in session.scalars(query)
+            ]
 
     def set_paused(self, paused: bool, by: str) -> None:
         self.s.runtime.set_paused(paused, by)
@@ -256,7 +305,8 @@ class ControlService:
                 raise ControlError("only outbound actions need approval")
             if action.status not in (ActionStatus.PENDING_APPROVAL, ActionStatus.DRAFTED):
                 raise ControlError(f"action is {action.status.value}, not awaiting approval")
-            if edited_text is not None and edited_text.strip() != (action.message_text or "").strip():
+            edited = edited_text is not None and edited_text.strip() != (action.message_text or "").strip()
+            if edited_text is not None and edited:
                 lead = session.get(Lead, action.lead_id) if action.lead_id else None
                 facts = dict((lead.signals or {}).get("facts", {})) if lead else {}
                 problems = self._validator.validate(
@@ -271,6 +321,18 @@ class ControlService:
             action.approved_by, action.approved_at = f"human:{by}", self.s.clock.now()
             action.not_before = None
             action.status_reason = f"approved by {by}"
+            audit(
+                session,
+                action.approved_at,
+                actor=by,
+                kind="action.approved",
+                subject=f"@{action.target_username}",
+                summary=f"{action.type.value} to @{action.target_username} approved by {by}"
+                + (" with edited text" if edited else ""),
+                action_id=action.id,
+                edited=edited,
+                message_sha256=action.message_sha256,
+            )
             return action_dict(action)
 
     def reject(self, action_id: str, by: str, reason: str = "", redraft: bool = False) -> dict[str, Any]:
@@ -280,6 +342,17 @@ class ControlService:
                 raise ControlError(f"action is {action.status.value}; cannot reject")
             action.status = ActionStatus.REJECTED
             action.status_reason = f"rejected by {by}: {reason}".strip()[:1000]
+            audit(
+                session,
+                self.s.clock.now(),
+                actor=by,
+                kind="action.rejected",
+                subject=f"@{action.target_username}",
+                summary=f"{action.type.value} to @{action.target_username} rejected by {by}: {reason or '-'}"
+                + (" (fresh draft requested)" if redraft else ""),
+                action_id=action.id,
+                redraft=redraft,
+            )
             lead = session.get(Lead, action.lead_id) if action.lead_id else None
             if lead is not None and action.type is ActionType.SEND_OUTREACH:
                 if redraft:
@@ -298,11 +371,31 @@ class ControlService:
 
     def resume_lane(self, channel: Channel, by: str, note: str = "") -> int:
         with self.s.db.session() as session:
-            return self._lanes.resume(session, self._account, channel, by, note)
+            released = self._lanes.resume(session, self._account, channel, by, note)
+            audit(
+                session,
+                self.s.clock.now(),
+                actor=by,
+                kind="lane.resumed",
+                subject=f"lane:{channel.value}",
+                summary=f"{channel.value} lane resumed by {by}; {released} parked action(s) released"
+                + (f"; note: {note}" if note else ""),
+                released=released,
+                note=note,
+            )
+            return released
 
     def halt_lane(self, channel: Channel, by: str, reason: str) -> None:
         with self.s.db.session() as session:
             self._lanes.halt_manually(session, self._account, channel, f"{by}: {reason}")
+            audit(
+                session,
+                self.s.clock.now(),
+                actor=by,
+                kind="lane.halted",
+                subject=f"lane:{channel.value}",
+                summary=f"{channel.value} lane halted manually by {by}: {reason}",
+            )
 
     # -- conversations -------------------------------------------------------------------
     def conversations(self, paused_only: bool = False, limit: int = 50) -> list[dict[str, Any]]:
@@ -383,9 +476,80 @@ class ControlService:
                 ]
             }
 
+    def add_lead(self, username: str, by: str, campaign_id: str | None = None, note: str = "") -> dict[str, Any]:
+        """Add a handle by hand. It goes through the same pipeline as discovered
+        leads: inspection, analysis, dedupe, scoring, gate."""
+        try:
+            handle = canonical_username(username)
+        except InvalidUsername as exc:
+            raise ControlError(str(exc)) from exc
+        simulated = handle.startswith("sim.")
+        if (self.s.settings.environment is Environment.LOCAL) != simulated:
+            raise ControlError(
+                "the local environment only accepts simulated sim.* handles"
+                if simulated is False
+                else "sim.* handles are simulated and never used in the live environment"
+            )
+        if handle == self.s.settings.account.username.lower():
+            raise ControlError("that is our own account")
+        now = self.s.clock.now()
+        with self.s.db.session() as session:
+            lead = session.scalars(select(Lead).where(Lead.username == handle)).first()
+            created = lead is None
+            if lead is None:
+                lead = Lead(
+                    username=handle,
+                    status=LeadStatus.DISCOVERED,
+                    campaign_id=campaign_id,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(lead)
+                session.flush()
+            exists = session.scalars(
+                select(LeadSource.id).where(
+                    LeadSource.lead_id == lead.id, LeadSource.strategy == "manual", LeadSource.seed == by
+                )
+            ).first()
+            if exists is None:
+                session.add(
+                    LeadSource(
+                        lead_id=lead.id,
+                        campaign_id=campaign_id,
+                        strategy="manual",
+                        query="manual",
+                        seed=by,
+                        hints={"note": [note]} if note else {},
+                        discovered_at=now,
+                    )
+                )
+            audit(
+                session,
+                now,
+                actor=by,
+                kind="lead.added",
+                subject=f"@{handle}",
+                summary=f"@{handle} added manually by {by}"
+                + ("" if created else f" (already known, status {lead.status.value})")
+                + (f": {note}" if note else ""),
+                lead_id=lead.id,
+            )
+            return lead_dict(lead) | {"created": created}
+
     def suppress(self, kind: SuppressionKind, value: str, reason: str, by: str) -> bool:
         with self.s.db.session() as session:
-            created = add_suppression(session, kind, value, f"{reason} (by {by})", "MANUAL")
+            created = add_suppression(session, kind, value, f"{reason} (by {by})", "MANUAL", self.s.clock.now())
+            audit(
+                session,
+                self.s.clock.now(),
+                actor=by,
+                kind="suppression.added",
+                subject=_suppression_subject(kind, value),
+                summary=f"{kind.value} {value} suppressed by {by}: {reason}" + ("" if created else " (already)"),
+                suppression_kind=kind,
+                value=value,
+                source="MANUAL",
+            )
             if kind is SuppressionKind.USERNAME:
                 lead = session.scalars(select(Lead).where(Lead.username == value.lstrip("@").lower())).first()
                 if lead is not None:
@@ -395,9 +559,19 @@ class ControlService:
                         self.s.ownership.cancel_open_outbound(session, conv, "prospect suppressed")
             return created
 
-    def unsuppress(self, kind: SuppressionKind, value: str) -> bool:
+    def unsuppress(self, kind: SuppressionKind, value: str, by: str = "operator") -> bool:
         with self.s.db.session() as session:
-            return remove_suppression(session, kind, value)
+            removed = remove_suppression(session, kind, value)
+            if removed:
+                audit(
+                    session,
+                    self.s.clock.now(),
+                    actor=by,
+                    kind="suppression.removed",
+                    subject=f"{kind.value}:{value}",
+                    summary=f"{kind.value} {value} un-suppressed by {by}",
+                )
+            return removed
 
     def suppressions(self) -> list[dict[str, Any]]:
         with self.s.db.session() as session:

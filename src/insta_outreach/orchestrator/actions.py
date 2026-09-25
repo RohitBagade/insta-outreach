@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import uuid
+import hashlib
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -31,8 +31,10 @@ PRIORITY = {
 }
 
 
-def new_action_id() -> str:
-    return f"act_{uuid.uuid4().hex[:24]}"
+def new_action_id(key: str) -> str:
+    """Derived from the (unique) idempotency key: stable across runs, so a
+    simulated run is reproducible down to the ids you approve by."""
+    return f"act_{hashlib.sha256(key.encode()).hexdigest()[:24]}"
 
 
 class ActionService:
@@ -75,7 +77,7 @@ class ActionService:
             return existing, False
         now = self._clock.now()
         action = Action(
-            id=new_action_id(),
+            id=new_action_id(key),
             idempotency_key=key,
             account_id=account_id,
             type=type,

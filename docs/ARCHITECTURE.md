@@ -243,6 +243,17 @@ Rohit uses the same account. Each conversation (`Conversation` row, keyed by use
 - One feedback retry, then deterministic templates whose observation sentences each require the fact they state.
 - Without an LLM the system runs on templates.
 
+## Audit trail and live readiness
+
+- **Audit trail** (`policy/audit.py`, table `audit_events`). Each event is written in the same transaction as the change it describes. Recorded:
+  - operator changes: mode (including refused AUTONOMOUS attempts), pause, limits, approvals and edits, rejections, lane resume/halt, suppressions, claims and releases, manual leads, browser session verifications;
+  - system decisions: proposal outcome (queued / auto-approved / blocked with reasons), sends, execution-time cancellations and demotions, parked or failed sends, replies handled, human takeovers, incidents opened and resolved, lane halts and cooldowns.
+
+  `insta-outreach audit` and `explain @handle` read it. The verification demo narrates from it.
+- **Live readiness** (`orchestrator/readiness.py`). `live_readiness()` computes the preflight checks. `ControlService.set_mode` refuses AUTONOMOUS for the live environment while any required check fails, and `run` and `tick` refuse to start in that state.
+- **Rollout sandbox** (`rollout.allowed_targets`). When set, the planners only draft for listed handles, and the gate denies any outbound action to anyone else. That second check runs at proposal and again at execution.
+- **Verification** (`verification.py`). `demo`, `scenario` and `browser-demo`. The scenario is deterministic: fixed clock, fixed seed, templates, and action ids derived from idempotency keys. Its transcript is committed as `docs/verification/expected_scenario.txt`.
+
 ## Environments
 
 | | `local` | `live` |
@@ -279,6 +290,7 @@ The real Playwright agent is tested against it, including a live-environment end
 | `incidents` | barriers and anomalies for a human |
 | `lanes` | lane state |
 | `usage_events` | ledger for caps and pacing |
-| `runtime_settings` | mode, pause, limit overrides (runtime-editable) |
+| `runtime_settings` | mode, pause, limit overrides (runtime-editable), browser-session verification marker |
+| `audit_events` | append-only audit trail, written in the same transaction as each change or decision |
 | `learned_locators` | resolver cache |
 | `webhook_events` | verified raw deliveries, deduplicated, pruned after 7 days |

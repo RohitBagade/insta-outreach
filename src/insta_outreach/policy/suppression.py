@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from datetime import datetime
 
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
@@ -33,7 +34,9 @@ def canonical_value(kind: SuppressionKind, value: str) -> str:
     return value
 
 
-def add_suppression(session: Session, kind: SuppressionKind, value: str, reason: str, source: str) -> bool:
+def add_suppression(
+    session: Session, kind: SuppressionKind, value: str, reason: str, source: str, at: datetime | None = None
+) -> bool:
     canonical = canonical_value(kind, value)
     exists = session.scalars(
         select(Suppression).where(Suppression.kind == kind, Suppression.value == canonical)
@@ -42,7 +45,10 @@ def add_suppression(session: Session, kind: SuppressionKind, value: str, reason:
         return False
     try:
         with session.begin_nested():
-            session.add(Suppression(kind=kind, value=canonical, reason=reason, source=source))
+            row = Suppression(kind=kind, value=canonical, reason=reason, source=source)
+            if at is not None:
+                row.created_at = at
+            session.add(row)
     except IntegrityError:
         return False
     return True

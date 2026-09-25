@@ -18,7 +18,7 @@ from insta_outreach.storage.db import Database
 from insta_outreach.util.clock import Clock
 
 
-async def interactive_login(settings: Settings, timeout_seconds: int = 900) -> str:
+async def interactive_login(settings: Settings, timeout_seconds: int = 900) -> tuple[bool, str]:
     """Open a visible browser on the persistent profile and wait for Rohit to
     log in (including any 2FA / checkpoint) himself. Nothing is typed for him."""
     ui = load_ui_map(settings.browser.ui_map_path)
@@ -37,8 +37,8 @@ async def interactive_login(settings: Settings, timeout_seconds: int = 900) -> s
             waited += 3
             state = await detector.detect(page, "home")
             if state.ok and "/accounts/" not in page.url and "/challenge/" not in page.url:
-                return f"logged in; session saved in {session.profile_dir}"
-        return "timed out waiting for login; run the command again when ready"
+                return True, f"logged in; session saved in {session.profile_dir}"
+        return False, "timed out waiting for login; run the command again when ready"
     finally:
         await session.close()
 

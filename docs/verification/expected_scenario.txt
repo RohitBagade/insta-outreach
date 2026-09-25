@@ -1,0 +1,146 @@
+insta-outreach verification scenario
+  environment LOCAL (simulated Instagram, 31 fictional sim.* accounts), seed 7, templates only (no LLM)
+  simulated start 2026-09-21 10:30 IST; data dir <DATA_DIR>/
+  limits: outreach/day=15, outreach/hour=4, send gap=240s+0-180s, follow-ups=2 after [3, 7]d, send hours=10:00-20:00
+
+== STEP 1  OBSERVE: discover and analyse only ==
+   simulated time 2026-09-21 10:30 IST
+    2026-09-21 10:30 IST  mode.changed             mode OBSERVE -> OBSERVE  [by operator]
+  leads by status: {'ANALYZED': 2, 'DISQUALIFIED': 2, 'DUPLICATE': 1, 'QUALIFIED': 11}
+    QUALIFIED @sim.smileline.dental score 100 - NEW_WEBSITE: no website is linked on the profile
+    QUALIFIED @sim.pawsome.pets.andheri score 100 - NEW_WEBSITE: no website is linked on the profile
+    QUALIFIED @sim.aroma.kitchen.mulund score 100 - NEW_WEBSITE: no website is linked on the profile
+    QUALIFIED @sim.tresses.by.nisha score 100 - NEW_WEBSITE: no website is linked on the profile
+    QUALIFIED @sim.glowup.salon.powai score 100 - NEW_WEBSITE: bio links to Linktree (a link-in-bio page) rather than an own website
+    QUALIFIED @sim.chai.and.chapters score 100 - NEW_WEBSITE: no website is linked on the profile
+    QUALIFIED @sim.the.brew.room score 100 - NEW_WEBSITE: no website is linked on the profile
+    QUALIFIED @sim.brightbite.clinic score 97 - ONLINE_BOOKING: the profile lists a phone number for bookings/enquiries; no online booking link found
+    QUALIFIED @sim.dr.mehta.dental score 95 - NEW_WEBSITE: bio links to WhatsApp (a WhatsApp/chat link) rather than an own website
+    QUALIFIED @sim.masala.junction score 75 - NEW_WEBSITE: bio links to Zomato (a listing on another platform) rather than an own website
+    QUALIFIED @sim.bombay.bao score 68 - WEBSITE_REBUILD: the site bombaybao.example is built on WordPress
+    DISQUALIFIED @sim.priya.travels - personal profile: no business signals
+    DISQUALIFIED @sim.mega.burger.india - too large (450000 followers): likely a chain or brand
+    DUPLICATE @sim.pearl.dental.khar - same domain as @sim.pearl.dental.bandra (pearldental.example)
+    ANALYZED @sim.pearl.dental.bandra - score 70 but no concrete LemmeDeliver opportunity observed
+    ANALYZED @sim.juhu.beach.bites - score 65 but no concrete LemmeDeliver opportunity observed
+  [PASS] at least 5 leads qualified with a concrete opportunity
+  [PASS] OBSERVE prepared no messages and sent nothing
+  [PASS] branch accounts sharing one website were merged (DUPLICATE)
+
+== STEP 2  DRAFT: messages are written but never sent ==
+   simulated time 2026-09-21 14:35 IST
+    2026-09-21 14:35 IST  mode.changed             mode OBSERVE -> DRAFT  [by operator]
+    DRAFTED for @sim.aroma.kitchen.mulund: Hi Aroma Kitchen team! I'm Rohit from LemmeDeliver. I came across your page in Mulund and noticed there's no website linked yet. We build fast, animated websites for local businesses, with online booking built in. Would you like me to share a quick concept?
+    DRAFTED for @sim.glowup.salon.powai: Hi there! I'm Rohit from LemmeDeliver. I noticed your bio link goes to Linktree rather than your own website. We build fast, animated websites for local businesses, with online booking built in. Would it help if I put together a quick concept for GlowUp Unisex Salon?
+    DRAFTED for @sim.pawsome.pets.andheri: Hi there! I'm Rohit from LemmeDeliver. I came across your page in Andheri and noticed there's no website linked yet. We build fast, animated websites for local businesses, with online booking built in. Would it help if I put together a quick concept for Pawsome Pet Store?
+    DRAFTED for @sim.smileline.dental: Hi Smileline Dental Studio team! I'm Rohit from LemmeDeliver. I came across your page in Andheri and noticed there's no website linked yet. We build fast, animated websites for local businesses, with online booking built in. Would it help if I put together a quick concept for Smileline Dental Studio?
+    DRAFTED for @sim.tresses.by.nisha: Hi there! I'm Rohit from LemmeDeliver. I came across your page in Borivali and noticed there's no website linked yet. We build fast, animated websites for local businesses, with online booking built in. Would you like me to share a quick concept?
+  [PASS] 5 drafts prepared (planner batch size)   (actual: 5)
+  [PASS] every draft is DRAFTED, none approved
+  [PASS] nothing sent in DRAFT   (actual: 0)
+
+== STEP 3  APPROVAL: only what a human approves is sent ==
+   simulated time 2026-09-21 14:45 IST
+  operator approves @sim.aroma.kitchen.mulund with an edit, rejects @sim.glowup.salon.powai
+  [PASS] an edit that adds a price is refused by the validator
+    2026-09-21 14:45 IST  mode.changed             mode DRAFT -> APPROVAL  [by operator]
+    2026-09-21 14:45 IST  action.approved          SEND_OUTREACH to @sim.aroma.kitchen.mulund approved by operator with edited text  [by operator]
+    2026-09-21 14:45 IST  action.rejected          SEND_OUTREACH to @sim.glowup.salon.powai rejected by operator: tone (fresh draft requested)  [by operator]
+    2026-09-21 14:45 IST  message.sent             initial message to @sim.aroma.kitchen.mulund sent via BROWSER (send_new_dm)  [by human:operator]
+    2026-09-21 15:15 IST  conversation.human_owned @sim.chai.and.chapters: owned by the human, automation paused: outbound message in thread was not sent by automation; 1 open action(s) cancelled
+  [PASS] exactly one message sent: the approved, edited text   (actual: 1)
+  [PASS] @sim.glowup.salon.powai got a fresh draft waiting for approval
+  [PASS] 9 other drafts are still waiting, unsent
+
+== STEP 4  AUTONOMOUS within tight caps (5/day, 2/hour, >=240s apart) + a comment on our post ==
+   simulated time 2026-09-21 15:45 IST
+  @sim.skinsense.derma comments on one of our posts
+  (drafts made under DRAFT/APPROVAL still need a human: AUTONOMOUS never approves them retroactively)
+    2026-09-21 15:45 IST  limits.changed           limit overrides: outreach_per_day=5, outreach_per_hour=2  [by operator]
+    2026-09-21 15:45 IST  mode.changed             mode APPROVAL -> AUTONOMOUS  [by operator]
+    2026-09-21 15:55 IST  message.sent             initial message to @sim.skinsense.derma sent via API (private_reply)  [by auto]
+
+== STEP 4b AUTONOMOUS, next morning ==
+   simulated time 2026-09-22 10:30 IST
+    2026-09-22 10:52 IST  reply.handled            @sim.aroma.kitchen.mulund: reply classified NOT_INTERESTED (keyword rule) -> suppressed: USERNAME=sim.aroma.kitchen.mulund, IGSID=9000000000000025, PHONE=9000000016
+    2026-09-22 10:52 IST  message.sent             initial message to @sim.urban.fade.barbers sent via BROWSER (send_new_dm)  [by auto]
+    2026-09-22 11:02 IST  message.sent             initial message to @sim.lotus.physio sent via BROWSER (send_new_dm)  [by auto]
+    2026-09-22 11:52 IST  message.sent             initial message to @sim.zari.boutique sent via BROWSER (send_new_dm)  [by auto]
+    2026-09-22 12:23 IST  send.not_sent            initial message to @sim.cake.canvas.powai not sent: NOT_PERMITTED cannot_message
+  first messages sent so far: 5; per day: {'2026-09-21': 2, '2026-09-22': 3}
+  [PASS] never more than 5 new conversations per day   (actual: {'2026-09-21': 2, '2026-09-22': 3})
+  [PASS] never more than 2 sends in any rolling hour   (actual: 2)
+  [PASS] at least 240 s between any two sends   (actual: min gap 610s)
+  [PASS] the commenter got one official private reply via the API (no browser)
+
+== STEP 5  replies arrive: opt-outs suppressed, interest handed to Rohit ==
+   simulated time 2026-09-23 10:30 IST
+    2026-09-23 10:52 IST  message.sent             initial message to @sim.happy.tails.grooming sent via BROWSER (send_new_dm)  [by auto]
+    @sim.aroma.kitchen.mulund replied -> lead CLOSED: NOT_INTERESTED (keyword rule)
+  [PASS] at least one prospect replied   (actual: 1)
+
+== STEP 6  Rohit messages a prospect himself: automation steps back ==
+   simulated time 2026-09-23 12:32 IST
+  Rohit writes to @sim.happy.tails.grooming from the Instagram app
+    2026-09-23 12:32 IST  conversation.human_owned @sim.happy.tails.grooming: owned by the human, automation paused: human replied from the Instagram app; 0 open action(s) cancelled
+  [PASS] @sim.happy.tails.grooming is now owned by Rohit, automation paused
+
+== STEP 7  follow-ups, three days after the first messages ==
+   simulated time 2026-09-26 10:30 IST
+    2026-09-26 10:30 IST  message.sent             initial message to @sim.smileline.dental sent via BROWSER (send_new_dm)  [by auto]
+    2026-09-26 10:40 IST  message.sent             initial message to @sim.pawsome.pets.andheri sent via BROWSER (send_new_dm)  [by auto]
+    2026-09-26 10:51 IST  message.sent             followup message to @sim.urban.fade.barbers sent via BROWSER (send_dm_reply)  [by auto]
+    2026-09-26 11:01 IST  message.sent             followup message to @sim.lotus.physio sent via BROWSER (send_dm_reply)  [by auto]
+    2026-09-26 11:11 IST  message.sent             followup message to @sim.zari.boutique sent via BROWSER (send_dm_reply)  [by auto]
+    2026-09-26 11:31 IST  message.sent             initial message to @sim.tresses.by.nisha sent via BROWSER (send_new_dm)  [by auto]
+    2026-09-26 11:41 IST  message.sent             initial message to @sim.glowup.salon.powai sent via BROWSER (send_new_dm)  [by auto]
+    2026-09-26 12:32 IST  message.sent             initial message to @sim.the.brew.room sent via BROWSER (send_new_dm)  [by auto]
+    2026-09-26 14:44 IST  reply.handled            @sim.glowup.salon.powai: reply classified OPT_OUT (keyword rule) -> suppressed: USERNAME=sim.glowup.salon.powai, IGSID=9000000000000005
+  follow-ups sent to: ['sim.lotus.physio', 'sim.urban.fade.barbers', 'sim.zari.boutique']
+  [PASS] follow-ups were sent   (actual: 3)
+  [PASS] no follow-up to @sim.happy.tails.grooming (Rohit owns that conversation)
+  [PASS] no follow-up after the private reply (Instagram allows more only once they answer)
+
+== STEP 8  checkpoint: the browser lane stops and waits for a human ==
+   simulated time 2026-09-27 10:30 IST
+  [fault injected] the next browser page is a 'Confirm it's you' checkpoint
+    2026-09-27 10:30 IST  conversation.human_owned @sim.smileline.dental: owned by the human, automation paused: handed off: prospect replied (INTERESTED); 0 open action(s) cancelled
+    2026-09-27 10:30 IST  reply.handled            @sim.smileline.dental: reply classified INTERESTED (keyword rule) -> handed off to Rohit with a suggested reply
+    2026-09-27 10:30 IST  conversation.human_owned @sim.the.brew.room: owned by the human, automation paused: handed off: prospect replied (QUESTION); 0 open action(s) cancelled
+    2026-09-27 10:30 IST  reply.handled            @sim.the.brew.room: reply classified QUESTION (keyword rule) -> handed off to Rohit with a suggested reply
+    2026-09-27 10:30 IST  incident.opened          incident #1 [CRITICAL] BROWSER lane halted: Instagram security checkpoint requires the account owner
+    2026-09-27 10:30 IST  lane.halted              BROWSER lane HALTED until a human resumes it: Instagram security checkpoint requires the account owner
+    2026-09-27 10:30 IST  send.stopped             initial message to @sim.brightbite.clinic not sent: CHECKPOINT_REQUIRED challenge_url - parked until a human resumes the lane
+  [PASS] browser lane HALTED   (actual: CHECKPOINT_REQUIRED: challenge_url)
+  [PASS] critical incident opened with the checkpoint page URL
+  [PASS] no browser activity at all while halted (6 ticks)   (actual: 0)
+  meanwhile the API lane kept working: 2 API operation(s)
+  parked for a human: ['SEND_OUTREACH @sim.brightbite.clinic']
+    2026-09-27 11:40 IST  incident.resolved        incident #1 resolved by operator: completed the check on my phone  [by operator]
+    2026-09-27 11:40 IST  lane.resumed             BROWSER lane resumed by operator; 1 parked action(s) released; note: completed the check on my phone  [by operator]
+  [PASS] resuming the lane releases the parked action(s)   (actual: 1)
+    2026-09-27 11:40 IST  message.sent             initial message to @sim.brightbite.clinic sent via BROWSER (send_new_dm)  [by auto]
+    2026-09-27 11:51 IST  message.sent             initial message to @sim.dr.mehta.dental sent via BROWSER (send_new_dm)  [by auto]
+  [PASS] browser activity resumes only after the human resumed the lane
+
+== STEP 9  rate limit: cooldown, never pushing on ==
+   simulated time 2026-09-28 10:30 IST
+  [fault injected] the next send attempt gets 'Try Again Later'
+    2026-09-28 10:30 IST  incident.opened          incident #2 [WARNING] BROWSER lane cooling down until 2026-09-29 05:00 UTC
+    2026-09-28 10:30 IST  lane.cooldown            BROWSER lane cooling down until 2026-09-29 05:00 UTC (rate limited: try_again_later)
+  [PASS] browser lane in COOLDOWN after the rate-limit signal   (actual: rate limited: try_again_later)
+  [PASS] cooldown lasts until 2026-09-29 10:30 IST
+  [PASS] nothing sent after the rate-limit signal   (actual: 0)
+
+== STEP 10 summary and whole-run invariants ==
+   simulated time 2026-09-28 12:30 IST
+  leads by status: {'ANALYZED': 2, 'CLOSED': 2, 'CONTACTED': 8, 'DISQUALIFIED': 5, 'DUPLICATE': 1, 'HANDED_OFF': 4, 'OUTREACH_PENDING': 2, 'UNREACHABLE': 1}
+  outbound actions: {'SEND_FOLLOW_UP:SUCCEEDED': 3, 'SEND_OUTREACH:APPROVED': 2, 'SEND_OUTREACH:CANCELLED': 1, 'SEND_OUTREACH:EXPIRED': 9, 'SEND_OUTREACH:FAILED': 1, 'SEND_OUTREACH:REJECTED': 1, 'SEND_OUTREACH:SUCCEEDED': 13}
+  sent via: {'private_reply:API': 1, 'send_dm_reply:BROWSER': 3, 'send_new_dm:BROWSER': 12}
+  audit events: {'action.approved': 1, 'action.proposed': 30, 'action.rejected': 1, 'conversation.human_owned': 4, 'incident.opened': 2, 'incident.resolved': 1, 'lane.cooldown': 1, 'lane.halted': 1, 'lane.resumed': 1, 'limits.changed': 1, 'message.sent': 16, 'mode.changed': 4, 'reply.handled': 4, 'send.not_sent': 1, 'send.stopped': 1}
+  [PASS] no automated message after a prospect replied (replies go to Rohit)
+  [PASS] no automated message after Rohit took a conversation over
+  [PASS] no automated message to anyone after they were suppressed
+  [PASS] database, audit trail and simulated Instagram agree on every automated message   (actual: 16 / 16 / 16)
+
+RESULT: 31/31 checks passed

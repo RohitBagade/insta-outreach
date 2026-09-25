@@ -41,6 +41,7 @@ from insta_outreach.domain.models import (
 from insta_outreach.execution.base import Guard
 from insta_outreach.orchestrator.pipeline import Pipeline, Services
 from insta_outreach.policy import usage as u
+from insta_outreach.policy.audit import audit
 from insta_outreach.policy.gate import GateDecision
 from insta_outreach.policy.lanes import LaneService
 from insta_outreach.storage.models import Action, Conversation, Lead, Message, UsageEvent
@@ -64,6 +65,7 @@ _SEND_USAGE = {
     ActionType.SEND_REPLY: u.SEND_REPLY,
 }
 LEASE_SECONDS = 900
+_IDEMPOTENT_CODES = ("already_sent_idempotent", "already_delivered")
 # A private reply that cannot be made now never becomes possible later (one
 # per comment, 7-day window); the lead falls back to a normal first DM.
 _PRIVATE_REPLY_FALLBACK = frozenset(
@@ -138,14 +140,36 @@ class ExecutionWorker:
                 return None
             channels = self.s.executor.candidate_channels(action.capability)
             decision = self.s.gate.check(session, action, channels, mode, paused, limits)
-            action.gate = dict(action.gate or {}) | {"execution": decision.as_dict()}
+            action.gate = _with_history(dict(action.gate or {}), decision, now)
             if decision.outcome is GateOutcome.DENY:
                 action.status, action.status_reason = ActionStatus.CANCELLED, "; ".join(decision.reasons)[:1000]
                 self._lead_on_denied(session, action, decision)
+                if action.type.is_outbound:
+                    audit(
+                        session,
+                        now,
+                        actor="system",
+                        kind="action.cancelled",
+                        subject=f"@{action.target_username}",
+                        summary=f"{action.type.value} to @{action.target_username} cancelled by the execution-time "
+                        f"gate: {'; '.join(decision.reasons)}",
+                        action_id=action.id,
+                        reasons=decision.reasons,
+                    )
                 return None
             if decision.outcome is GateOutcome.DEFER:
                 if decision.requires_approval:
                     action.status, action.approved_by, action.approved_at = ActionStatus.PENDING_APPROVAL, None, None
+                    audit(
+                        session,
+                        now,
+                        actor="system",
+                        kind="action.demoted",
+                        subject=f"@{action.target_username}",
+                        summary=f"auto-approved {action.type.value} to @{action.target_username} moved back to the "
+                        f"approval queue: {'; '.join(decision.reasons)}",
+                        action_id=action.id,
+                    )
                 elif decision.not_before is not None:
                     action.not_before = decision.not_before
                 action.status_reason = "; ".join(decision.reasons)[:1000]
@@ -307,7 +331,8 @@ class ExecutionWorker:
                 )
             new_status, not_before, final = self._next_state(action, outcome, limits)
             action.status, action.not_before = new_status, not_before
-            action.status_reason = f"{outcome.status.value}: {outcome.code or ''} {outcome.detail or ''}".strip()[:1000]
+            detail = " ".join(part for part in (outcome.code, outcome.detail) if part)
+            action.status_reason = (f"{outcome.status.value}: {detail}" if detail else outcome.status.value)[:1000]
             if final:
                 action.completed_at = now
 
@@ -378,6 +403,23 @@ class ExecutionWorker:
                 self._ledger.record(
                     session, action.account_id, outcome.channel, _SEND_USAGE[action.type], action_id=action.id
                 )
+            audit(
+                session,
+                now,
+                actor=action.approved_by or "system",
+                kind="message.sent",
+                subject=f"@{action.target_username}",
+                summary=f"{action.message_kind or 'message'} message to @{action.target_username} sent via "
+                f"{outcome.channel.value} ({action.capability.value})"
+                + (" - already delivered earlier, not re-sent" if outcome.code in _IDEMPOTENT_CODES else ""),
+                action_id=action.id,
+                channel=outcome.channel,
+                capability=action.capability,
+                approved_by=action.approved_by,
+                code=outcome.code,
+                message_sha256=action.message_sha256,
+                simulated=outcome.simulated,
+            )
             if lead is not None:
                 lead.last_outbound_at = now
                 if recipient and not lead.igsid:
@@ -394,6 +436,22 @@ class ExecutionWorker:
             return
         if intent is not None and outcome.status in _NOT_SENT:
             intent.delivery_state = "FAILED"
+        if final or outcome.status.is_barrier:
+            audit(
+                session,
+                now,
+                actor="system",
+                kind="send.stopped" if outcome.status.is_barrier else "send.not_sent",
+                subject=f"@{action.target_username}",
+                summary=f"{action.message_kind or 'message'} message to @{action.target_username} not sent: "
+                f"{outcome.status.value} {outcome.code or ''}".strip()
+                + (" - parked until a human resumes the lane" if outcome.status.is_barrier else ""),
+                action_id=action.id,
+                channel=outcome.channel,
+                status=outcome.status,
+                code=outcome.code,
+                detail=(outcome.detail or "")[:300],
+            )
         if lead is None or not final:
             return
         if (
@@ -438,6 +496,16 @@ class ExecutionWorker:
         if lead is None or lead.status is not LeadStatus.OUTREACH_PENDING:
             return
         Pipeline._lead_after_block(lead, decision.reasons)
+
+
+def _with_history(gate: dict[str, Any], decision: GateDecision, now: datetime) -> dict[str, Any]:
+    """Latest execution decision plus a compact history of *changes* (why it waited)."""
+    entry = decision.as_dict() | {"at": now.isoformat()}
+    history = list(gate.get("history", []))
+    last = history[-1] if history else None
+    if last is None or (last.get("outcome"), last.get("reasons")) != (entry["outcome"], entry["reasons"]):
+        history = [*history, entry][-20:]
+    return gate | {"execution": decision.as_dict(), "history": history}
 
 
 def summarize(results: list[ExecutionResult]) -> list[dict[str, Any]]:

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from insta_outreach.config import LimitsSettings, Settings
 from insta_outreach.domain.enums import OperatingMode
+from insta_outreach.policy.audit import audit
 from insta_outreach.storage.db import Database
 from insta_outreach.storage.models import RuntimeSetting
 from insta_outreach.util.clock import Clock
@@ -21,6 +22,7 @@ from insta_outreach.util.clock import Clock
 MODE_KEY = "operating_mode"
 PAUSED_KEY = "global_pause"
 LIMITS_KEY = "limits_overrides"
+BROWSER_SESSION_KEY = "browser_session"
 
 
 class RuntimeControl:
@@ -52,9 +54,20 @@ class RuntimeControl:
 
     def set_mode(self, mode: OperatingMode, by: str) -> OperatingMode:
         with self._db.session() as session:
-            previous = self._get(session, MODE_KEY)
+            raw = self._get(session, MODE_KEY)
+            previous = OperatingMode(raw) if raw else self._settings.default_mode
             self._put(session, MODE_KEY, mode.value, by)
-        return OperatingMode(previous) if previous else self._settings.default_mode
+            audit(
+                session,
+                self._clock.now(),
+                actor=by,
+                kind="mode.changed",
+                subject="runtime",
+                summary=f"mode {previous.value} -> {mode.value}",
+                previous=previous,
+                mode=mode,
+            )
+        return previous
 
     # -- global pause (kill switch: no executor calls at all) ---------------
     def paused(self) -> bool:
@@ -64,6 +77,15 @@ class RuntimeControl:
     def set_paused(self, paused: bool, by: str) -> None:
         with self._db.session() as session:
             self._put(session, PAUSED_KEY, bool(paused), by)
+            audit(
+                session,
+                self._clock.now(),
+                actor=by,
+                kind="pause.changed",
+                subject="runtime",
+                summary=f"global pause {'ON: no executor activity' if paused else 'OFF'}",
+                paused=bool(paused),
+            )
 
     # -- limits ------------------------------------------------------------
     def limit_overrides(self) -> dict[str, Any]:
@@ -87,11 +109,48 @@ class RuntimeControl:
             raise ValueError(f"unknown limit keys: {sorted(unknown)}")
         with self._db.session() as session:
             self._put(session, LIMITS_KEY, current, by)
+            audit(
+                session,
+                self._clock.now(),
+                actor=by,
+                kind="limits.changed",
+                subject="runtime",
+                summary="limit overrides: " + ", ".join(f"{k}={v}" for k, v in sorted(overrides.items())),
+                overrides=overrides,
+                active_overrides=current,
+            )
         return validated
 
     def clear_limit_overrides(self, by: str) -> None:
         with self._db.session() as session:
             self._put(session, LIMITS_KEY, {}, by)
+            audit(
+                session,
+                self._clock.now(),
+                actor=by,
+                kind="limits.cleared",
+                subject="runtime",
+                summary="limit overrides cleared (configured limits apply)",
+            )
+
+    # -- browser session proof (for the live readiness check) --------------------
+    def browser_session(self) -> dict[str, Any]:
+        with self._db.session() as session:
+            return dict(self._get(session, BROWSER_SESSION_KEY) or {})
+
+    def record_browser_session(self, via: str, by: str, detail: str = "") -> None:
+        now = self._clock.now()
+        with self._db.session() as session:
+            self._put(session, BROWSER_SESSION_KEY, {"verified_at": now.isoformat(), "via": via}, by)
+            audit(
+                session,
+                now,
+                actor=by,
+                kind="browser.session_verified",
+                subject="lane:BROWSER",
+                summary=f"browser session verified via {via}" + (f": {detail}" if detail else ""),
+                via=via,
+            )
 
     def snapshot(self) -> dict[str, Any]:
         with self._db.session() as session:

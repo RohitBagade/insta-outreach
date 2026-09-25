@@ -415,3 +415,21 @@ class WebhookEvent(Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSON)
     processed_at: Mapped[datetime | None]
     error: Mapped[str | None] = mapped_column(Text)
+
+
+class AuditEvent(Base):
+    """Append-only audit trail: operator changes and the system's decisions.
+
+    Written in the same transaction as the change it describes, so the trail
+    and the state can never disagree.
+    """
+
+    __tablename__ = "audit_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    at: Mapped[datetime] = mapped_column(index=True)
+    actor: Mapped[str] = mapped_column(String(64))  # "cli", "operator", "system", "auto", "human:<name>"
+    kind: Mapped[str] = mapped_column(String(64), index=True)  # e.g. "mode.changed", "message.sent"
+    subject: Mapped[str | None] = mapped_column(String(128), index=True)  # e.g. "@handle", "lane:BROWSER"
+    summary: Mapped[str] = mapped_column(String(512))
+    detail: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
