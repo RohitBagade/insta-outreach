@@ -22,9 +22,10 @@ from insta_outreach.execution.simulator import (
 from insta_outreach.intelligence.analyzer import LeadAnalyzer
 from insta_outreach.intelligence.website import HttpWebsiteChecker, WebsiteChecker
 from insta_outreach.llm import AnthropicLLM, StructuredLLM
-from insta_outreach.notify import FanoutNotifier, LogNotifier, Notifier, WebhookNotifier
+from insta_outreach.notify import FanoutNotifier, LogNotifier, Notifier, TelegramNotifier, WebhookNotifier
 from insta_outreach.orchestrator.actions import ActionService
 from insta_outreach.orchestrator.control import ControlService
+from insta_outreach.orchestrator.monitor import MonitorService
 from insta_outreach.orchestrator.pipeline import IdentityResolver, Pipeline, Services
 from insta_outreach.orchestrator.service import EventSource, Orchestrator
 from insta_outreach.orchestrator.worker import ExecutionWorker
@@ -53,6 +54,7 @@ class App:
     worker: ExecutionWorker
     orchestrator: Orchestrator
     control: ControlService
+    monitor: MonitorService
     lanes: LaneService
     incidents: IncidentService
     ledger: UsageLedger
@@ -65,6 +67,21 @@ class App:
     async def close(self) -> None:
         await self.executor.close()
         self.db.dispose()
+
+
+def build_notifier(settings: Settings) -> FanoutNotifier:
+    """Log always; plus the webhook and/or Telegram when configured."""
+    cfg = settings.notifications
+    extra: list[Notifier] = []
+    if cfg.webhook_url:
+        extra.append(WebhookNotifier(cfg.webhook_url, cfg.min_severity))
+    if cfg.telegram_bot_token is not None and cfg.telegram_chat_id:
+        extra.append(
+            TelegramNotifier(
+                cfg.telegram_bot_token.get_secret_value(), cfg.telegram_chat_id, cfg.min_severity, cfg.dashboard_url
+            )
+        )
+    return FanoutNotifier(LogNotifier(), *extra)
 
 
 def _live_adapters(
@@ -112,12 +129,7 @@ def build_app(
     db = Database(settings.resolved_database_url)
     db.create_all()
     if notifier is None:
-        extra = (
-            [WebhookNotifier(settings.notifications.webhook_url, settings.notifications.min_severity)]
-            if settings.notifications.webhook_url
-            else []
-        )
-        notifier = FanoutNotifier(LogNotifier(), *extra)
+        notifier = build_notifier(settings)
     incidents = IncidentService(clock, notifier)
     lanes = LaneService(clock, incidents)
     ledger = UsageLedger(clock)
@@ -197,6 +209,7 @@ def build_app(
         worker=worker,
         orchestrator=orchestrator,
         control=control,
+        monitor=MonitorService(services, lanes, ledger),
         lanes=lanes,
         incidents=incidents,
         ledger=ledger,

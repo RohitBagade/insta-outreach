@@ -51,6 +51,7 @@ Replies to prospects still go to the approval queue in `AUTONOMOUS` unless `repl
 python3 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"
 insta-outreach scenario --check      # deterministic 10-step scenario; must print IDENTICAL ... 31/31 checks passed
 insta-outreach demo --checkpoint     # 4 simulated days, narrated from the audit trail, no Instagram involved
+insta-outreach demo --watch --checkpoint   # the same, slowed down, live in Mission Control: http://127.0.0.1:8765
 insta-outreach browser-demo          # the real browser agent against a local mock of the Instagram UI
 ```
 
@@ -68,18 +69,32 @@ It narrates every event as it happens and ends with the commands to inspect the 
 Day-to-day use:
 
 ```bash
-.venv/bin/insta-outreach init                 # creates config/settings.yaml + database (local, OBSERVE)
-.venv/bin/insta-outreach run                  # orchestrator + console on http://127.0.0.1:8765
+.venv/bin/insta-outreach setup --service      # .env with a control token, config, database, Chromium, start-at-log-in service
+.venv/bin/insta-outreach run                  # orchestrator + Mission Control on http://127.0.0.1:8765
 .venv/bin/insta-outreach mode APPROVAL        # change the runtime mode
 .venv/bin/insta-outreach approvals            # review drafts; approve / reject --redraft
 ```
 
-The console at `http://127.0.0.1:8765` shows:
+### Mission Control: see everything, live
 
-- status, lanes and incidents;
-- the approval queue (approve, edit or reject);
-- leads and conversations (claim or release);
-- the pause switch.
+`http://127.0.0.1:8765` is a live view of the whole system, refreshed every 1.5 seconds:
+
+- **Workflow:** Discover → Analyze → Qualified → Draft → Gate → Send → Conversations, with counts. A step pulses when something happens in it, and the Gate shows why queued messages are waiting.
+- **Live activity:** every decision, send, reply, handoff, incident and lane change. It also shows what the agent itself does: searches, profile inspections, inbox reads.
+- **Limits:** today's usage against every cap, computed exactly like the gate computes it, and when the next send may happen.
+- **Lanes, incidents** (with the checkpoint screenshot) and **go-live readiness**.
+- **Controls:**
+  - approve, edit or reject messages;
+  - take over or hand back a conversation;
+  - never-contact;
+  - halt or resume a lane;
+  - switch mode;
+  - **Pause all**.
+
+  Every button goes through the same audited checks as the CLI.
+- **Any handle** opens its conversation and full decision trail.
+
+It works on a phone via Tailscale. Telegram alerts reach you for checkpoints and warm leads. See **[docs/DEPLOY.md](docs/DEPLOY.md)**.
 
 ## Safeguards
 
@@ -138,6 +153,7 @@ The comment → private-reply path and the API-only reply path are fully within 
 
 - [docs/VERIFY.md](docs/VERIFY.md): reproduce everything yourself. Expected outputs, where to look, what is and is not proven.
 - [docs/LIVE_CHECKLIST.md](docs/LIVE_CHECKLIST.md): going live with @lemmedeliver, phase by phase, starting with your own test account.
+- [docs/DEPLOY.md](docs/DEPLOY.md): running it on your computer as a service, Mission Control on your phone, Telegram alerts, webhooks, backups.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): components, the pipeline, routing, lanes, conversation ownership, idempotency, data model, extension points.
 - [docs/RESEARCH.md](docs/RESEARCH.md): what the Meta APIs can and cannot do (Sept 2026, with sources), and why Playwright plus a constrained Claude resolver was chosen over browser-use or Stagehand.
 - [docs/OPERATIONS.md](docs/OPERATIONS.md): runbook covering setup, modes, approvals, incidents and resuming lanes, human takeover, retention and troubleshooting.
@@ -162,5 +178,5 @@ Project layout (`src/insta_outreach/`):
 | `intelligence/` | signals, website checks, opportunity and score analysis, entity dedupe |
 | `personalization/` | Claude/template composer, message validator |
 | `execution/` | executor (routing), Graph API adapter, Playwright browser agent, simulator |
-| `api/` | webhooks + control plane (FastAPI), console |
+| `api/` | webhooks + control plane (FastAPI), Mission Control (`api/static/`, fed by `orchestrator/monitor.py`) |
 | `storage/` | SQLAlchemy models (SQLite by default) |

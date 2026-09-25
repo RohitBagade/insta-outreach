@@ -143,7 +143,7 @@ A lane is `(account, channel)` in state `ACTIVE`, `COOLDOWN` (until a time) or `
 | `UI_CHANGED` | halt after 2 consecutive (a profile with no Message button counts, with threshold + 1) |
 | anything successful | resets the drift counter |
 
-Nothing in the system tries to get *past* a barrier. `insta-outreach lane resume browser` (or the console) reopens the lane after Rohit has resolved it himself, and releases the parked actions.
+Nothing in the system tries to get *past* a barrier. `insta-outreach lane resume browser` (or Mission Control) reopens the lane after Rohit has resolved it himself, and releases the parked actions.
 
 ## Browser agent (Tier 2)
 
@@ -252,6 +252,11 @@ Rohit uses the same account. Each conversation (`Conversation` row, keyed by use
   `insta-outreach audit` and `explain @handle` read it. The verification demo narrates from it.
 - **Live readiness** (`orchestrator/readiness.py`). `live_readiness()` computes the preflight checks. `ControlService.set_mode` refuses AUTONOMOUS for the live environment while any required check fails, and `run` and `tick` refuse to start in that state.
 - **Rollout sandbox** (`rollout.allowed_targets`). When set, the planners only draft for listed handles, and the gate denies any outbound action to anyone else. That second check runs at proposal and again at execution.
+- **Mission Control** (`orchestrator/monitor.py`, `api/static/`).
+  - `/api/overview`: pipeline counts, lanes, and limit usage. The usage is read from the same usage ledger the gate enforces.
+  - `/api/feed`: the audit trail merged with every executor attempt, served by cursor so the page polls without missing or repeating an event.
+  - The page is static: a strict Content-Security-Policy, no inline script, and all external text inserted as text.
+  - Its buttons call the same audited `ControlService` as the CLI.
 - **Verification** (`verification.py`). `demo`, `scenario` and `browser-demo`. The scenario is deterministic: fixed clock, fixed seed, templates, and action ids derived from idempotency keys. Its transcript is committed as `docs/verification/expected_scenario.txt`.
 
 ## Environments

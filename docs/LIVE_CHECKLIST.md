@@ -27,13 +27,15 @@ Work through the phases in order and tick each box. Every phase ends with a **pa
 | Credential | Needed for | Where it goes |
 |---|---|---|
 | Your Instagram login for @lemmedeliver | browser lane | **Nowhere in files.** You type it yourself in the window opened by `insta-outreach browser login`. Only the resulting session cookies are stored, in `data/browser_profiles/lemmedeliver/`. |
-| `CONTROL_API_TOKEN` | required in live (kill switch, approvals, console) | `.env` in the repository root. Generate one: `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
+| `CONTROL_API_TOKEN` | required in live (kill switch, approvals, Mission Control) | `.env` in the repository root. Generate one: `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
 | `IG_ACCESS_TOKEN` | API lane (optional, Phase 3) | `.env` |
 | `IG_USER_ID` | API lane: the Instagram professional account id | `.env` |
 | `IG_APP_SECRET` | verifying webhook signatures | `.env` |
 | `IG_WEBHOOK_VERIFY_TOKEN` | webhook handshake: any random string you choose | `.env` |
 | `ANTHROPIC_API_KEY` | optional: Claude writes the messages; without it, validated templates are used | `.env` |
 | `NOTIFY_WEBHOOK_URL` | optional: incidents and warm leads posted to n8n / Slack relay | `.env` |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | optional: checkpoint and warm-lead alerts on your phone ([DEPLOY.md §6](DEPLOY.md#6-alerts-on-your-phone-telegram)) | `.env` |
+| `DASHBOARD_URL` | optional: your Tailscale address for Mission Control, linked in every alert | `.env` |
 
 - [ ] **Create `.env`.** Run `cp .env.example .env`, then fill in `CONTROL_API_TOKEN`.
   - The CLI loads `.env` automatically; variables already set in your shell win.
@@ -107,7 +109,7 @@ You can come back to this phase after Phase 4.
 - [ ] **Development mode needs testers** ⚠. In development mode the API only serves accounts with a role on the app. Add your test account as an **Instagram tester** (App roles → Roles), then accept the invite as that account: instagram.com → Settings → *Apps and websites* → *Tester invites*.
   - For real prospects you will later need **Advanced Access**: App Review + Business Verification + app set to Live.
   - Outreach-style use may be hard to justify in App Review.
-- [ ] **Expose the webhook endpoint.** `insta-outreach run` serves the webhook on `127.0.0.1:8765`. Meta needs a public HTTPS URL, so expose **only** `/webhooks/instagram` through a tunnel or reverse proxy (e.g. Cloudflare Tunnel, ngrok, Caddy). Keep `/api/*` and the console private.
+- [ ] **Expose the webhook endpoint.** `insta-outreach run` serves the webhook on `127.0.0.1:8765`. Meta needs a public HTTPS URL, so expose **only** `/webhooks/instagram` through a tunnel or reverse proxy. [DEPLOY.md §7](DEPLOY.md#7-instagram-webhooks-optional) has a Cloudflare Tunnel config that allows exactly that path. Keep `/api/*` and Mission Control private.
 - [ ] **Configure the webhook** ⚠. In the app's Webhooks settings:
   - Callback URL: `https://<your-public-host>/webhooks/instagram`
   - Verify token: the value of `IG_WEBHOOK_VERIFY_TOKEN`
@@ -168,14 +170,14 @@ Remove the sandbox from `config/settings.yaml`:
 - or restore the campaign block from `config/settings.example.yaml`;
 - keep limits low at first, e.g. `outreach_per_day: 5`.
 
-- [ ] **5a. OBSERVE, 1-3 days.** Run `insta-outreach mode OBSERVE`, then `insta-outreach run` (orchestrator + console).
+- [ ] **5a. OBSERVE, 1-3 days.** Run `insta-outreach mode OBSERVE`, then `insta-outreach run` (orchestrator + Mission Control).
   - Daily: `insta-outreach leads`, `insta-outreach incidents`.
   - Spot-check 10 leads with `explain`: are the facts true? Are the disqualifications right?
   - **Pass:** no factual errors in 10 spot checks, no incidents, browser activity within hours (`audit`).
 - [ ] **5b. DRAFT, 1-2 days.** Run `insta-outreach mode DRAFT`.
   - Read at least 20 drafts in `insta-outreach generated outreach`.
   - **Pass:** every claim in every draft is true and the tone is right. Reject with `--redraft` if not; the reasons go into the audit trail.
-- [ ] **5c. APPROVAL, about a week.** Run `insta-outreach mode APPROVAL`. Approve drafts one by one: console or `approvals` / `approve` / `reject`.
+- [ ] **5c. APPROVAL, about a week.** Run `insta-outreach mode APPROVAL`. Approve drafts one by one: Mission Control (Approvals tab) or `approvals` / `approve` / `reject`.
   - **Pass:**
     - at least 3 approved sends succeeded (this is `preflight`'s `approved_sends`);
     - replies were handled correctly;

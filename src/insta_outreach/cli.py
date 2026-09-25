@@ -42,6 +42,13 @@ def _app(args: argparse.Namespace) -> Any:
 
 # ------------------------------------------------------------------ commands
 def cmd_init(args: argparse.Namespace) -> int:
+    app = _prepare(args)
+    _print(app.control.status() | {"limits": "…"})
+    return 0
+
+
+def _prepare(args: argparse.Namespace) -> Any:
+    """Config file, data directories and database; returns the app."""
     target = Path(args.config or default_config_path())
     if not target.exists():
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -56,7 +63,48 @@ def cmd_init(args: argparse.Namespace) -> int:
         Path(directory).mkdir(parents=True, exist_ok=True)
     app = _app(args)
     print(f"database ready: {settings.resolved_database_url}")
-    _print(app.control.status() | {"limits": "…"})
+    return app
+
+
+def cmd_setup(args: argparse.Namespace) -> int:
+    """Prepare this computer: .env with a control token, config, Chromium, optional service file."""
+    import subprocess
+
+    from insta_outreach.deploy import current_service_plan, ensure_env_file
+
+    root = Path.cwd()
+    if not (root / "pyproject.toml").exists() or not (root / ".env.example").exists():
+        print("run this from the insta-outreach folder (where pyproject.toml is)", file=sys.stderr)
+        return 2
+    created, token = ensure_env_file(root)
+    print(f"{'created' if created else 'kept'} .env")
+    if token:
+        print(f"  CONTROL_API_TOKEN generated and saved in .env: {token}")
+        print("  (Mission Control asks for it once per browser tab; keep it private)")
+    load_dotenv(root / ".env")
+    _prepare(args)
+    if not args.no_browser:
+        print("installing Playwright's Chromium (first time: ~150 MB)...")
+        done = subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=False)
+        if done.returncode != 0:
+            print("Chromium install failed; on Linux try: python -m playwright install --with-deps chromium")
+            return 1
+    if args.service:
+        plan = current_service_plan(root)
+        (root / "data").mkdir(exist_ok=True)
+        for path, content in plan.files.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+            print(f"wrote {path}")
+        print("start it (and at every log-in):")
+        for command in plan.start:
+            print(f"  {command}")
+        print("stop it:")
+        for command in plan.stop:
+            print(f"  {command}")
+        print(f"logs:  {plan.logs}")
+    print("next: insta-outreach demo --watch --checkpoint   # Mission Control with simulated data")
+    print("      then docs/LIVE_CHECKLIST.md for the real account (browser login is yours to do)")
     return 0
 
 
@@ -418,6 +466,51 @@ def _runtime(settings: Settings) -> Any:
     return RuntimeControl(db, settings, SystemClock())
 
 
+def cmd_alerts(args: argparse.Namespace) -> int:
+    """Check phone/webhook alerts: send a test alert, or find your Telegram chat id."""
+    from insta_outreach.domain.enums import IncidentSeverity
+    from insta_outreach.notify import TelegramNotifier, WebhookNotifier, telegram_chats
+
+    cfg = load_settings(args.config).notifications
+    if args.alerts_action == "find-chat":
+        if cfg.telegram_bot_token is None:
+            print("set TELEGRAM_BOT_TOKEN in .env first (create a bot with @BotFather)", file=sys.stderr)
+            return 2
+        try:
+            chats = asyncio.run(telegram_chats(cfg.telegram_bot_token.get_secret_value()))
+        except RuntimeError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        if not chats:
+            print("No messages yet. Open your bot in Telegram, press Start (or send it anything), then run this again.")
+            return 1
+        for chat_id, name in chats:
+            print(f"TELEGRAM_CHAT_ID={chat_id}   # {name}")
+        return 0
+
+    title = "Test alert from insta-outreach"
+    detail = "If you can read this, alerts reach you. Real alerts: checkpoints, halted lanes, warm leads."
+    ok = True
+    if cfg.telegram_bot_token is not None and cfg.telegram_chat_id:
+        telegram = TelegramNotifier(
+            cfg.telegram_bot_token.get_secret_value(), cfg.telegram_chat_id, IncidentSeverity.INFO, cfg.dashboard_url
+        )
+        asyncio.run(telegram.notify(title, detail, IncidentSeverity.CRITICAL))
+        print(f"telegram: {'FAILED - ' + telegram.last_error if telegram.last_error else 'sent'}")
+        ok = ok and telegram.last_error is None
+    else:
+        print("telegram: not configured (TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID; see docs/DEPLOY.md)")
+    if cfg.webhook_url:
+        asyncio.run(
+            WebhookNotifier(cfg.webhook_url, IncidentSeverity.INFO).notify(title, detail, IncidentSeverity.CRITICAL)
+        )
+        print("webhook: posted (failures are logged above)")
+    else:
+        print("webhook: not configured (NOTIFY_WEBHOOK_URL)")
+    print(f"alerts at or above {cfg.min_severity.value} are sent; everything is also in the log and the audit trail")
+    return 0 if ok else 1
+
+
 def cmd_mock_site(args: argparse.Namespace) -> int:
     import uvicorn
 
@@ -432,18 +525,24 @@ def cmd_demo(args: argparse.Namespace) -> int:
     """Accelerated multi-day run against the simulated world (no Instagram, no network)."""
     from insta_outreach.verification import run_demo
 
-    asyncio.run(
-        run_demo(
-            Path(args.data_dir),
-            days=args.days,
-            mode=OperatingMode(args.mode.upper()),
-            checkpoint=args.checkpoint,
-            rate_limit=args.rate_limit,
-            human=args.human or None,
-            commenter=args.commenter or None,
-            use_llm=args.use_llm,
+    tick_seconds = args.tick_seconds if args.tick_seconds is not None else (1.0 if args.watch else 0.0)
+    try:
+        asyncio.run(
+            run_demo(
+                Path(args.data_dir),
+                days=args.days,
+                mode=OperatingMode(args.mode.upper()),
+                checkpoint=args.checkpoint,
+                rate_limit=args.rate_limit,
+                human=args.human or None,
+                commenter=args.commenter or None,
+                use_llm=args.use_llm,
+                watch_port=args.port if args.watch else None,
+                tick_seconds=tick_seconds,
+            )
         )
-    )
+    except KeyboardInterrupt:
+        print("\nstopped")
     return 0
 
 
@@ -491,6 +590,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("init", help="create config, data dirs and database").set_defaults(fn=cmd_init)
+    p = sub.add_parser("setup", help="prepare this computer: .env + control token, config, Chromium, service file")
+    p.add_argument("--service", action="store_true", help="also write a start-at-log-in service for this OS")
+    p.add_argument("--no-browser", action="store_true", help="skip installing Playwright's Chromium")
+    p.set_defaults(fn=cmd_setup)
     sub.add_parser("status", help="mode, lanes, counters").set_defaults(fn=cmd_status)
     p = sub.add_parser("mode", help="show or set the runtime operating mode")
     p.add_argument(
@@ -522,6 +625,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--commenter", default="sim.smileline.dental", help="account that comments on our post on day 1")
     p.add_argument("--use-llm", action="store_true", help="use Claude for messages if credentials exist")
     p.add_argument("--data-dir", default="data/demo")
+    p.add_argument("--watch", action="store_true", help="serve Mission Control while the demo runs (slowed down)")
+    p.add_argument("--port", type=int, default=8765, help="port for --watch (default 8765)")
+    p.add_argument(
+        "--tick-seconds",
+        type=float,
+        help="real seconds per simulated 10 minutes (default 1 with --watch, otherwise 0)",
+    )
     p.set_defaults(fn=cmd_demo)
     p = sub.add_parser("scenario", help="deterministic self-checking scenario (compare with the expected transcript)")
     p.add_argument("--data-dir", default="data/scenario")
@@ -629,6 +739,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--target", help="probe: a profile to inspect read-only")
     p.add_argument("--query", help="probe: a search query to run read-only")
     p.set_defaults(fn=cmd_browser)
+    p = sub.add_parser("alerts", help="phone/webhook alerts: send a test, or find your Telegram chat id")
+    p.add_argument("alerts_action", choices=["test", "find-chat"])
+    p.set_defaults(fn=cmd_alerts)
     p = sub.add_parser("mock-site", help="run the mock Instagram UI for local browser demos")
     p.add_argument("--port", type=int, default=8899)
     p.set_defaults(fn=cmd_mock_site)
@@ -638,7 +751,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     load_dotenv()  # secrets from ./.env (never committed); real environment variables win
-    chatty = args.command in ("run", "serve", "tick", "browser", "init")
+    chatty = args.command in ("run", "serve", "tick", "browser", "init", "setup")
     narrated = args.command in ("demo", "scenario", "browser-demo")  # events are printed as narration
     logging.basicConfig(
         level=logging.DEBUG

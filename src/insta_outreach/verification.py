@@ -17,6 +17,7 @@ Every run keeps its database in its own data directory and writes a
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 from collections import Counter
 from collections.abc import Callable
@@ -216,7 +217,12 @@ async def run_demo(
     commenter: str | None = "sim.smileline.dental",
     use_llm: bool = False,
     echo: bool = True,
+    watch_port: int | None = None,
+    tick_seconds: float = 0.0,
 ) -> list[str]:
+    """Narrated multi-day run. ``watch_port`` also serves Mission Control during
+    the run (``tick_seconds`` of real time per simulated 10 minutes) and keeps it
+    up afterwards until Ctrl+C."""
     out = Out(echo)
     settings = local_settings(prepare_data_dir(data_dir))
     clock = FakeClock(START)
@@ -234,8 +240,16 @@ async def run_demo(
     )
     out(f"database: {settings.resolved_database_url}")
     narrator.flush()
+    dashboard = None
 
     try:
+        if watch_port is not None:
+            from insta_outreach.api.server import BackgroundServer
+
+            dashboard = await BackgroundServer.start(app, port=watch_port)
+            out(f"Mission Control: {dashboard.url}  (open it in your browser now)")
+            out(f"pace: {tick_seconds:g}s of real time per simulated 10 minutes; starting in 5 seconds")
+            await asyncio.sleep(5)
         for day in range(1, days + 1):
             day_start = START + timedelta(days=day - 1)
             clock.set(day_start)
@@ -269,6 +283,8 @@ async def run_demo(
                     if severity != "INFO":
                         out(f"    NOTIFY Rohit [{severity}] {title}" + (f" - {clip(detail, 100)}" if detail else ""))
                 notes.items.clear()
+                if tick_seconds > 0:
+                    await asyncio.sleep(tick_seconds)  # --watch: time to see each step in Mission Control
             sent_today = [a for a in _sends(app) if a["status"] == "SUCCEEDED" and a["id"] not in sends_before]
             by_kind = Counter(f"{a['type']} via {a['executed_channel']}" for a in sent_today)
             delta = {k: v - counts_before.get(k, 0) for k, v in _counts(app).items() if v != counts_before.get(k, 0)}
@@ -300,7 +316,13 @@ async def run_demo(
         out(f"incidents (all): {[i['title'] for i in app.control.incidents(open_only=False)]}")
         out("")
         _inspect_hint(out, config)
+        if dashboard is not None:
+            out("")
+            out(f"The demo is over; Mission Control stays up at {dashboard.url} - press Ctrl+C to stop.")
+            await dashboard.wait()
     finally:
+        if dashboard is not None:
+            await dashboard.stop()
         await app.close()
     return out.lines
 

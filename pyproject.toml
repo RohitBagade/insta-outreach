@@ -61,7 +61,6 @@ extend-immutable-calls = ["fastapi.Body", "fastapi.Query", "fastapi.Depends", "f
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["B011", "ASYNC240"]
 # HTML/JS templates embedded as strings.
-"src/insta_outreach/api/dashboard.py" = ["E501"]
 "src/insta_outreach/devtools/mock_instagram.py" = ["E501"]
 
 [tool.mypy]
