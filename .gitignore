@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+
+# Runtime data: databases, browser profiles (contain live session cookies!),
+# evidence screenshots, traces. Never commit these.
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Local configuration and secrets
+config/settings.yaml
+.env
+.env.*
+!.env.example

@@ -1,0 +1,146 @@
+# insta-outreach settings. Copy to config/settings.yaml (`insta-outreach init` does it).
+# Secrets are better supplied as environment variables (see .env.example).
+#
+# SAFE DEFAULTS: environment=local runs everything against the in-process
+# simulated Instagram world; default_mode=OBSERVE never prepares or sends
+# outreach. The mode is changed at runtime (`insta-outreach mode ...` or the
+# console), not here — this value is only used until a mode is set.
+
+environment: local          # local | live
+default_mode: OBSERVE       # OBSERVE | DRAFT | APPROVAL | AUTONOMOUS
+data_dir: data
+# database_url: postgresql+psycopg://user:pass@host/db   # default: sqlite in data_dir/<environment>.db
+
+account:
+  id: lemmedeliver
+  username: lemmedeliver
+
+# --- Tier 1: official Meta APIs (see docs/RESEARCH.md for what each login type can do) ---
+api:
+  enabled: false
+  login_type: instagram      # instagram (graph.instagram.com) | facebook (graph.facebook.com; enables Business Discovery)
+  graph_version: v26.0
+  # access_token / app_secret / webhook_verify_token / ig_user_id -> use env vars
+  # IG_ACCESS_TOKEN, IG_APP_SECRET, IG_WEBHOOK_VERIFY_TOKEN, IG_USER_ID
+  use_business_discovery: true
+
+# --- Tier 2: Playwright browser agent on the normal Instagram web UI ---
+browser:
+  enabled: false             # live only; run `insta-outreach browser login` first
+  base_url: https://www.instagram.com
+  allowed_hosts: [www.instagram.com, instagram.com]
+  profiles_dir: data/browser_profiles   # persistent session (contains login cookies: keep private)
+  evidence_dir: data/evidence
+  headless: true
+  channel: null              # "chrome" to drive an installed Google Chrome
+  locale: en-US              # detectors match English UI text: keep the IG account language English
+  timezone_id: Asia/Kolkata
+  typing_delay_ms: 35
+  screenshot_on_success: true
+  trace_on_failure: true     # Playwright trace zip for failed operations (playwright show-trace)
+  llm_fallback: true         # constrained Claude fallback for unexpected pages / changed UI
+  # ui_map_path: config/ui_map.yaml   # patch selectors/detector text without code changes
+
+llm:
+  enabled: true              # needs ANTHROPIC_API_KEY (or an `ant auth login` profile); templates otherwise
+  model: claude-opus-5
+  vision_model: claude-opus-5
+  personalization_effort: high
+  vision_effort: low
+  use_refusal_fallbacks: true
+  max_calls_per_hour: 200
+
+# --- Safeguards (conservative: one shared, manually used account) ---
+limits:
+  outreach_per_day: 15
+  outreach_per_hour: 4
+  followups_per_day: 10
+  replies_per_hour: 20
+  browser_units_per_hour: 120        # page views / steps across all browser work
+  profile_inspections_per_day: 250
+  discovery_runs_per_day: 12
+  min_seconds_between_sends: 240
+  send_jitter_seconds: 180
+  min_seconds_between_browser_units: 6
+  browser_unit_jitter_seconds: 6
+  max_concurrent_browser_sessions: 1
+  max_followups_per_lead: 2
+  followup_after_days: [3, 7]        # days after the previous message
+  rate_limit_cooldown_minutes: 1440  # lane cooldown after a rate-limit signal
+  rate_limit_events_before_halt: 2   # 2 rate limits within 24h -> lane halted for a human
+  ui_changed_events_before_halt: 2
+  retry_max_attempts: 3
+  approval_ttl_hours: 72
+
+schedule:
+  timezone: Asia/Kolkata
+  browser_active_hours: ["09:30", "21:30"]
+  send_hours: ["10:00", "20:00"]
+  tick_seconds: 20
+  discovery_interval_minutes: 90
+  inbox_sync_interval_minutes: 30
+  max_actions_per_tick: 5
+
+offer:
+  brand: LemmeDeliver
+  sender_name: Rohit
+  website_url: https://lemmedeliver.com
+  include_link_in_first_message: false
+  language: English
+  max_message_chars: 480
+
+scoring:
+  min_score_to_contact: 60
+  require_business_signals: true
+  check_websites: true
+  sweet_spot_followers: [300, 50000]
+  max_followers: 300000
+  inactive_after_days: 120
+
+campaigns:
+  - id: mumbai-local-services
+    enabled: true
+    niches: [dentist, restaurant, salon, cafe, pet shop, boutique]
+    locations: [Mumbai, Navi Mumbai, Thane]
+    strategies:
+      - name: keyword_search
+        params: {max_queries_per_run: 3, max_results: 20}
+      - name: suggested_accounts          # "similar accounts" of qualified leads
+        params: {seeds_per_run: 2, max_results: 15}
+      - name: hashtag                     # derived tags like #thanecafe unless `tags` given
+        params: {tags_per_run: 2, max_posts: 9}
+      - name: location
+        enabled: false
+        params: {locations: [{name: Bandra West, url: "https://www.instagram.com/explore/locations/<id>/<slug>/"}]}
+      - name: followers_of
+        enabled: false
+        params: {seeds: [], max_results: 40}
+      - name: post_engagers
+        enabled: false
+        params: {posts: [], max_results: 30}
+
+replies:
+  autonomous: false          # even in AUTONOMOUS mode, replies go to the approval queue unless true
+  handoff_on_interest: true  # interested/question replies are handed to Rohit (automation pauses)
+
+ownership:
+  lock_ttl_seconds: 300
+  human_hold_hours: null     # null: a conversation Rohit touched stays paused until released
+
+control_api:
+  host: 127.0.0.1
+  port: 8765
+  # token: set CONTROL_API_TOKEN
+
+notifications:
+  # webhook_url: https://your-n8n.example/webhook/insta-outreach   (or NOTIFY_WEBHOOK_URL)
+  min_severity: WARNING
+
+retention:
+  webhook_payload_days: 7    # raw webhook payloads (may include unrelated DMs) are deleted after this
+  evidence_days: 30          # screenshots/traces; folders cited by open incidents are kept
+
+simulation:                  # local environment only
+  seed: 7
+  api_business_discovery: true
+  prospects_reply: true
