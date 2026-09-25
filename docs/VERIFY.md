@@ -69,7 +69,7 @@ The same works for `data/scenario/settings.yaml` and `data/browser-demo/settings
 | Browser screenshots / evidence | `insta-outreach browser-demo`, then `data/browser-demo/evidence/<date>/` | Real screenshots (`*-sent.png`, `*-checkpoint_required.png`, `*-already_contacted.png`) and Playwright trace zips (`playwright show-trace <zip>`). `incidents --all` and `action <id>` list the evidence files per attempt. The pure simulation renders no pages, so it has no screenshots. |
 | Agent decisions and why | `insta-outreach explain @sim.smileline.dental` | For one lead, in order: how it was found (every source), the facts observed, each opportunity with its rationale, the score arithmetic, every action with its proposal-time and execution-time gate decisions (e.g. `DEFER - hourly outreach cap 4 reached`), every attempt and result, all messages, conversation owner, and its audit trail. |
 | One action in detail | `insta-outreach action <act_…id>` | Message text, facts used, gate decisions plus the history of every deferral reason, attempts, evidence, page URLs. |
-| Everything at once, visually | `insta-outreach serve`, then open http://127.0.0.1:8765 | The console: status, lanes, approval queue, leads, incidents, conversations. |
+| Everything at once, visually, live | `insta-outreach demo --watch --checkpoint`, then open http://127.0.0.1:8765 | **Mission Control**: the workflow with live counts, every event as it happens (including the agent's own searches and inbox reads), limit usage, lanes, incidents, approvals, conversations. Click any handle for its conversation and decision trail. The demo runs at 1 s per simulated 10 minutes (`--tick-seconds`) and keeps serving until Ctrl+C. |
 
 The raw data is one SQLite file per run (`data/demo/local.db`), readable with any SQLite viewer. The tables are listed in [ARCHITECTURE.md](ARCHITECTURE.md#data-model-sqlite-by-default-any-sqlalchemy-url).
 
@@ -150,7 +150,7 @@ insta-outreach mode AUTONOMOUS      # simulation: allowed. Live: refused unless 
 insta-outreach pause on             # global kill switch, any mode
 ```
 
-The console (`insta-outreach serve`) has the same switch. Every change is in `insta-outreach audit --kind mode`, including refused attempts.
+Mission Control has the same switch: the mode buttons in its header. A live AUTONOMOUS switch asks for confirmation, and the server still refuses it while preflight fails. Every change is in `insta-outreach audit --kind mode`, including refused attempts.
 
 **Proof.** Create a file `live-proof.yaml` that selects the live environment with no credentials:
 

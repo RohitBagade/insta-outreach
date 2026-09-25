@@ -8,7 +8,8 @@ OBSERVE -> AUTONOMOUS never needs a restart or a different code path.
 Environment overrides:
   * ``INSTA_OUTREACH_CONFIG``   path of the YAML file (default config/settings.yaml)
   * ``IG_ACCESS_TOKEN``, ``IG_APP_SECRET``, ``IG_WEBHOOK_VERIFY_TOKEN``,
-    ``CONTROL_API_TOKEN``, ``NOTIFY_WEBHOOK_URL``  common secrets
+    ``CONTROL_API_TOKEN``, ``NOTIFY_WEBHOOK_URL``, ``TELEGRAM_BOT_TOKEN``,
+    ``TELEGRAM_CHAT_ID``, ``DASHBOARD_URL``  common secrets
   * ``INSTA__SECTION__KEY=value``  any nested key, value parsed as YAML
     (e.g. ``INSTA__LIMITS__OUTREACH_PER_DAY=10``)
 """
@@ -373,6 +374,15 @@ class RetentionSettings(BaseModel):
 class NotificationSettings(BaseModel):
     webhook_url: str | None = None  # generic JSON POST (n8n, Slack-compatible relays...)
     min_severity: IncidentSeverity = IncidentSeverity.WARNING
+    # Phone alerts through a Telegram bot (docs/DEPLOY.md: create one with @BotFather).
+    telegram_bot_token: SecretStr | None = None
+    telegram_chat_id: str | None = None
+    # Included in every alert so it can be opened in one tap (e.g. your Tailscale URL).
+    dashboard_url: str | None = None
+
+    @property
+    def telegram_configured(self) -> bool:
+        return self.telegram_bot_token is not None and bool(self.telegram_chat_id)
 
 
 class SimulationSettings(BaseModel):
@@ -423,6 +433,9 @@ _SECRET_ENV = {
     "IG_USER_ID": ("api", "ig_user_id"),
     "CONTROL_API_TOKEN": ("control_api", "token"),
     "NOTIFY_WEBHOOK_URL": ("notifications", "webhook_url"),
+    "TELEGRAM_BOT_TOKEN": ("notifications", "telegram_bot_token"),
+    "TELEGRAM_CHAT_ID": ("notifications", "telegram_chat_id"),
+    "DASHBOARD_URL": ("notifications", "dashboard_url"),
 }
 
 

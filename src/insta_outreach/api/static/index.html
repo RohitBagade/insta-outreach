@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Outreach Mission Control</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <strong>Mission Control</strong>
+    <span class="env" id="env">…</span>
+    <span class="muted" id="account"></span>
+  </div>
+  <div class="modes" role="group" aria-label="Operating mode" id="modes">
+    <button data-mode="OBSERVE" title="Discover and analyse only; never prepares or sends">Observe</button>
+    <button data-mode="DRAFT" title="Writes messages, never sends">Draft</button>
+    <button data-mode="APPROVAL" title="Sends only what you approve">Approval</button>
+    <button data-mode="AUTONOMOUS" title="Sends automatically within every limit">Autonomous</button>
+  </div>
+  <div class="right">
+    <button id="pause" class="pause">Pause all</button>
+    <span class="conn" id="conn" title="Connection to the orchestrator">● connecting</span>
+    <span class="clock" id="clock" title="Orchestrator clock"></span>
+  </div>
+</header>
+
+<div class="attention" id="attention" hidden></div>
+
+<main>
+  <section class="card flow-card">
+    <div class="card-head">
+      <h2>Workflow <span class="muted small">live: every lead, every step</span></h2>
+      <span class="muted small" id="flowNote"></span>
+    </div>
+    <div class="flow" id="flow"></div>
+  </section>
+
+  <div class="split">
+    <section class="card feed-card">
+      <div class="card-head">
+        <h2>Live activity</h2>
+        <div class="chips" id="feedFilters">
+          <button data-filter="all" class="on">All</button>
+          <button data-filter="sends">Sends</button>
+          <button data-filter="decisions">Decisions</button>
+          <button data-filter="people">Replies &amp; people</button>
+          <button data-filter="incidents">Incidents</button>
+          <button data-filter="agent">Agent activity</button>
+        </div>
+      </div>
+      <ol class="feed" id="feed" aria-live="polite"></ol>
+    </section>
+
+    <aside class="side">
+      <section class="card">
+        <h2>Today's limits</h2>
+        <div id="meters"></div>
+        <p class="small muted" id="sendWindow"></p>
+      </section>
+      <section class="card">
+        <h2>Lanes</h2>
+        <div id="lanes"></div>
+      </section>
+      <section class="card">
+        <h2>Go-live readiness</h2>
+        <div id="preflight" class="small"></div>
+      </section>
+    </aside>
+  </div>
+
+  <section class="card">
+    <div class="tabs" role="tablist" id="tabs">
+      <button data-tab="approvals" class="on">Approvals <span class="count" id="c-approvals"></span></button>
+      <button data-tab="incidents">Incidents <span class="count" id="c-incidents"></span></button>
+      <button data-tab="conversations">Conversations <span class="count" id="c-conversations"></span></button>
+      <button data-tab="leads">Leads</button>
+      <button data-tab="audit">Audit trail</button>
+    </div>
+    <div id="tab" class="tab-body"></div>
+  </section>
+</main>
+
+<aside class="drawer" id="drawer" hidden>
+  <div class="drawer-head">
+    <h2 id="drawerTitle"></h2>
+    <button id="drawerClose" aria-label="Close">✕</button>
+  </div>
+  <div id="drawerBody" class="drawer-body"></div>
+</aside>
+
+<dialog id="tokenDialog">
+  <form method="dialog">
+    <h2>Control token</h2>
+    <p class="small muted">This console needs the <code>CONTROL_API_TOKEN</code> from your <code>.env</code>. It is kept only for this browser tab.</p>
+    <input id="tokenInput" type="password" autocomplete="off" placeholder="paste token">
+    <div class="row"><button value="ok" class="primary">Save</button></div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status" hidden></div>
+</body>
+</html>

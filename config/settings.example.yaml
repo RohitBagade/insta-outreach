@@ -134,7 +134,9 @@ control_api:
 
 notifications:
   # webhook_url: https://your-n8n.example/webhook/insta-outreach   (or NOTIFY_WEBHOOK_URL)
-  min_severity: WARNING
+  # Telegram phone alerts: TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID in .env (docs/DEPLOY.md)
+  # dashboard_url: https://your-computer.your-tailnet.ts.net        (or DASHBOARD_URL; linked in alerts)
+  min_severity: WARNING      # INFO also sends routine replies and takeovers; CRITICAL only lane stops
 
 rollout:                     # guards for going live (docs/LIVE_CHECKLIST.md)
   allowed_targets: []        # e.g. [your_test_account]: outbound ONLY to these handles while testing live

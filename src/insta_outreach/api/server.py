@@ -1,10 +1,14 @@
 """HTTP surface: Meta webhooks (public, signature-verified) + control plane.
 
 The control plane (status, runtime mode, approvals, incidents, lanes,
-conversation ownership, suppressions) requires ``control_api.token`` as a
-Bearer token whenever one is configured, and binds to 127.0.0.1 by default.
-In the LIVE environment the token is mandatory: without one every control
-endpoint answers 503.
+conversation ownership, suppressions, the live Mission Control feed) requires
+``control_api.token`` as a Bearer token whenever one is configured, and binds
+to 127.0.0.1 by default. In the LIVE environment the token is mandatory:
+without one every control endpoint answers 503.
+
+``/`` serves Mission Control, a static page (``static/``) under a strict
+Content-Security-Policy: no inline script, no third-party origin. It holds no
+data itself; everything comes from the token-protected endpoints below.
 """
 
 from __future__ import annotations
@@ -14,14 +18,15 @@ import contextlib
 import hmac
 import json
 import logging
+import socket
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 
-from insta_outreach.api.dashboard import DASHBOARD_HTML
 from insta_outreach.app import App
 from insta_outreach.domain.enums import (
     ActionStatus,
@@ -32,9 +37,23 @@ from insta_outreach.domain.enums import (
     SuppressionKind,
 )
 from insta_outreach.orchestrator.control import ControlError
+from insta_outreach.reporting import explain_lead
 from insta_outreach.webhooks import verify_signature
 
 log = logging.getLogger(__name__)
+
+STATIC_DIR = Path(__file__).with_name("static")
+_STATIC_TYPES = {"app.js": "text/javascript; charset=utf-8", "app.css": "text/css; charset=utf-8"}
+_PAGE_HEADERS = {
+    "Content-Security-Policy": (
+        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; "
+        "connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+    ),
+    "X-Frame-Options": "DENY",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Cache-Control": "no-cache",
+}
 
 
 def create_api(app: App, run_orchestrator: bool = False) -> FastAPI:
@@ -105,10 +124,32 @@ def create_api(app: App, run_orchestrator: bool = False) -> FastAPI:
         app.webhook_inbox.store(payload)  # processed by the orchestrator tick
         return "EVENT_RECEIVED"
 
+    # ---------------------------------------------------------- mission control
+    @api.get("/", include_in_schema=False)
+    def dashboard() -> FileResponse:
+        return FileResponse(STATIC_DIR / "index.html", media_type="text/html; charset=utf-8", headers=_PAGE_HEADERS)
+
+    @api.get("/static/{name}", include_in_schema=False)
+    def static(name: str) -> FileResponse:
+        media_type = _STATIC_TYPES.get(name)  # a fixed list: nothing else is ever served from disk here
+        if media_type is None:
+            raise HTTPException(status_code=404, detail="not found")
+        return FileResponse(STATIC_DIR / name, media_type=media_type, headers=_PAGE_HEADERS)
+
+    @api.get("/api/overview")
+    def overview(_: str = Depends(require_token)) -> dict[str, Any]:
+        return app.monitor.overview()
+
+    @api.get("/api/feed")
+    def feed(
+        audit: int | None = Query(default=None, ge=0),
+        attempt: int | None = Query(default=None, ge=0),
+        limit: int = Query(default=80, ge=1, le=500),
+        _: str = Depends(require_token),
+    ) -> dict[str, Any]:
+        return app.monitor.feed(after_audit=audit, after_attempt=attempt, limit=limit)
+
     # ----------------------------------------------------------------- control
-    @api.get("/", response_class=HTMLResponse)
-    async def dashboard() -> str:
-        return DASHBOARD_HTML
 
     @api.get("/api/status")
     async def status(_: str = Depends(require_token)) -> dict[str, Any]:
@@ -157,9 +198,8 @@ def create_api(app: App, run_orchestrator: bool = False) -> FastAPI:
     async def approve(
         action_id: str, body: dict[str, Any] = Body(default={}), who: str = Depends(require_token)
     ) -> dict[str, Any]:
-        return guarded(
-            lambda: app.control.approve(action_id, by=body.get("by") or who, edited_text=body.get("message"))
-        )
+        edited = body.get("edited_text", body.get("message"))
+        return guarded(lambda: app.control.approve(action_id, by=body.get("by") or who, edited_text=edited))
 
     @api.post("/api/actions/{action_id}/reject")
     async def reject(
@@ -187,6 +227,11 @@ def create_api(app: App, run_orchestrator: bool = False) -> FastAPI:
     @api.get("/api/leads/{ref}")
     async def lead(ref: str, _: str = Depends(require_token)) -> dict[str, Any]:
         return guarded(lambda: app.control.lead_detail(ref))
+
+    @api.get("/api/leads/{ref}/explain")
+    def explain(ref: str, _: str = Depends(require_token)) -> dict[str, Any]:
+        """The lead's decision trail: every step, gate verdict and message, in order."""
+        return {"lines": guarded(lambda: explain_lead(app, ref))}
 
     @api.post("/api/leads")
     async def add_lead(body: dict[str, Any] = Body(...), who: str = Depends(require_token)) -> dict[str, Any]:
@@ -277,6 +322,46 @@ def create_api(app: App, run_orchestrator: bool = False) -> FastAPI:
         return FileResponse(target)
 
     return api
+
+
+@dataclass
+class BackgroundServer:
+    """The control plane served from the caller's event loop (``demo --watch``)."""
+
+    server: Any  # uvicorn.Server
+    task: asyncio.Task[None]
+    url: str
+
+    @classmethod
+    async def start(cls, app: App, host: str = "127.0.0.1", port: int = 8765) -> BackgroundServer:
+        import uvicorn
+
+        with socket.socket() as probe:  # a clear message instead of uvicorn exiting the process
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                probe.bind((host, port))
+            except OSError as exc:
+                raise ControlError(f"cannot serve on {host}:{port} ({exc.strerror}); choose another --port") from exc
+        config = uvicorn.Config(
+            create_api(app), host=host, port=port, log_level="warning", lifespan="off", timeout_graceful_shutdown=2
+        )
+        server = uvicorn.Server(config)
+        task = asyncio.create_task(server.serve())
+        while not server.started:
+            if task.done():
+                task.result()
+                raise ControlError(f"the dashboard server did not start on {host}:{port}")
+            await asyncio.sleep(0.05)
+        return cls(server, task, f"http://{host}:{port}")
+
+    async def wait(self) -> None:
+        """Until the server stops (Ctrl+C)."""
+        await self.task
+
+    async def stop(self) -> None:
+        self.server.should_exit = True
+        with contextlib.suppress(asyncio.CancelledError):
+            await self.task
 
 
 def _channel(raw: str) -> Channel:

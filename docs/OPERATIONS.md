@@ -17,13 +17,13 @@ Before anything live, run through **[VERIFY.md](VERIFY.md)** (simulation, reprod
 - **Secrets as environment variables:** `IG_ACCESS_TOKEN`, `IG_USER_ID`, `IG_APP_SECRET`, `IG_WEBHOOK_VERIFY_TOKEN`, `CONTROL_API_TOKEN`, `NOTIFY_WEBHOOK_URL`, `ANTHROPIC_API_KEY`. A `.env` file in the working directory is loaded automatically; variables already set in the shell win.
 - **Overrides of any setting:** `INSTA__SECTION__KEY=value`, e.g. `INSTA__LIMITS__OUTREACH_PER_DAY=10`.
 
-The **runtime mode, the pause switch and limit overrides** are stored in the database. They change without a restart, from the CLI or the console, and every change is recorded with who made it.
+The **runtime mode, the pause switch and limit overrides** are stored in the database. They change without a restart, from the CLI or Mission Control, and every change is recorded with who made it.
 
 ## 2. Rolling out safely
 
 1. `environment: local`. Run `insta-outreach demo` and `insta-outreach run` against the simulator until the behaviour and messages look right. Nothing here touches Instagram.
 2. `environment: live`, mode **OBSERVE**. The live database is separate (`data/live.db`) and simulated leads can never leak into it. Discovery and analysis run on the real account; check `insta-outreach leads` for sensible qualification.
-3. **DRAFT**. Messages are written but never sent. Read them in the console or with `insta-outreach approvals`.
+3. **DRAFT**. Messages are written but never sent. Read them in Mission Control or with `insta-outreach approvals`.
 4. **APPROVAL**. You approve each message (optionally edited) or reject it (`--redraft` for a fresh draft). Stay here until the drafts are consistently good.
 5. **AUTONOMOUS**. For the live account this is **refused by code** until `insta-outreach preflight` passes:
    - control token;
@@ -68,32 +68,34 @@ Why this lane matters:
    - Callback URL: `https://<your-host>/webhooks/instagram`. Verify token: the same value as `IG_WEBHOOK_VERIFY_TOKEN`.
    - Subscribe to the fields **`messages`, `message_echoes`, `comments`**.
    - Deliveries are rejected unless their `X-Hub-Signature-256` matches `IG_APP_SECRET`. In live mode, a missing app secret returns 503.
-   - Expose **only** `/webhooks/instagram` publicly, for example through a reverse proxy or tunnel. Keep `/api/*` and the console on localhost or behind the token.
+   - Expose **only** `/webhooks/instagram` publicly, for example through a reverse proxy or tunnel. Keep `/api/*` and Mission Control on localhost or behind the token ([DEPLOY.md §7](DEPLOY.md#7-instagram-webhooks-optional)).
 4. Run `insta-outreach run`. It starts the orchestrator and the HTTP server; `--no-api` would disable webhooks.
 
 ## 5. Daily operation
 
-| Task | CLI | Console (`http://127.0.0.1:8765`) |
+| Task | CLI | Mission Control (`http://127.0.0.1:8765`) |
 |---|---|---|
-| Overview: mode, lanes, counters, incidents | `insta-outreach status` | Status panel |
-| Review / approve / edit / reject drafts | `approvals`, `approve <id> [--message "..."]`, `reject <id> --reason ... [--redraft]` | Approval queue |
-| Leads and why they (don't) qualify | `leads [--status QUALIFIED]`, `explain @handle` | Leads |
-| Every decision about one lead, in order | `explain @handle` | – |
-| Generated messages and their fate | `generated [outreach\|followup\|reply\|all]` | Approval queue |
-| Message log (sent, received, Rohit's own) | `messages [@handle]` | Conversations |
+| Overview: mode, lanes, counters, incidents | `insta-outreach status` | Header, attention strip, workflow, lanes |
+| Review / approve / edit / reject drafts | `approvals`, `approve <id> [--message "..."]`, `reject <id> --reason ... [--redraft]` | Approvals tab |
+| Leads and why they (don't) qualify | `leads [--status QUALIFIED]`, `explain @handle` | Leads tab; click a workflow step |
+| Every decision about one lead, in order | `explain @handle` | click any handle → decision trail |
+| Generated messages and their fate | `generated [outreach\|followup\|reply\|all]` | Approvals tab (waiting), Live activity |
+| Message log (sent, received, Rohit's own) | `messages [@handle]` | click any handle → conversation |
 | One action: gate decisions, attempts, evidence | `actions [--type …] [--status …]`, `action <id>` | – |
-| Audit trail | `audit [--kind mode\|message.sent\|lane\|…] [--subject @handle]` | – |
-| Limits and stop behaviour in force | `safety` | – |
-| Live readiness (AUTONOMOUS prerequisites) | `preflight` | – |
+| Audit trail | `audit [--kind mode\|message.sent\|lane\|…] [--subject @handle]` | Live activity; Audit trail tab |
+| Limits and stop behaviour in force | `safety` | Today's limits (usage vs caps) |
+| Live readiness (AUTONOMOUS prerequisites) | `preflight` | Go-live readiness |
 | Add a handle by hand (full pipeline) | `add-lead @handle [--note …]` | – |
 | Never-contact list | `suppressions` | – |
-| Take over a conversation | `claim @handle` | Conversations → Claim |
-| Hand a conversation back | `release @handle` | Conversations → Release |
-| Never contact someone | `suppress @handle` (or `--kind DOMAIN/PHONE/EMAIL`) | – |
-| Stop everything now | `pause on` / `pause off` | Pause switch |
+| Take over a conversation | `claim @handle` | Conversations → Take over |
+| Hand a conversation back | `release @handle` | Conversations → Hand back |
+| Never contact someone | `suppress @handle` (or `--kind DOMAIN/PHONE/EMAIL`) | click the handle → Never contact |
+| Stop everything now | `pause on` / `pause off` | Pause all |
+| Halt / resume a lane | `lane halt browser`, `lane resume browser --note …` | Lanes, Incidents |
+| Alerts on your phone | `alerts find-chat`, `alerts test` | – (see [DEPLOY.md §6](DEPLOY.md#6-alerts-on-your-phone-telegram)) |
 | Change limits | `limits --set outreach_per_day=10 min_seconds_between_sends=300`, `limits --clear` | – |
 
-With `CONTROL_API_TOKEN` set, the console asks for the token and the HTTP API expects `Authorization: Bearer <token>`. **In live mode the control plane refuses to work without a token** (503).
+With `CONTROL_API_TOKEN` set, Mission Control asks for the token once per browser tab and the HTTP API expects `Authorization: Bearer <token>`. **In live mode the control plane refuses to work without a token** (503).
 
 ## 6. Working alongside automation
 
@@ -132,7 +134,7 @@ A **lane** is one channel (API or browser) of the account. When Instagram shows 
 
 ## 9. Troubleshooting
 
-- **Nothing is being sent.** Check `insta-outreach status` (mode, pause, lanes), then the actions list in the console (or `GET /api/actions`): the `gate` field of each action lists its reasons, such as send hours, caps, pacing or awaiting approval.
+- **Nothing is being sent.** Check `insta-outreach status` (mode, pause, lanes), then the Gate step in Mission Control, which lists why queued messages wait (or `GET /api/actions`): the `gate` field of each action lists its reasons, such as send hours, caps, pacing or awaiting approval.
 - **A lead isn't contacted.** Run `insta-outreach lead @handle`: `status_reason`, `score_breakdown`, `disqualify_reasons` and `opportunities` explain why. Qualification requires a concrete opportunity.
 - **UI drift.** Selectors and detector texts are data. Copy the relevant entries into a YAML file, point `browser.ui_map_path` at it, and re-run `browser probe`. With `ANTHROPIC_API_KEY` set, the constrained resolver usually finds moved elements by itself and caches what it learned. Repeated drift still halts the lane on purpose.
 - **Claude unavailable.** Messages fall back to validated templates and unknown pages stop the lane. Check the key, or `llm.max_calls_per_hour`.

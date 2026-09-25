@@ -418,6 +418,51 @@ def _runtime(settings: Settings) -> Any:
     return RuntimeControl(db, settings, SystemClock())
 
 
+def cmd_alerts(args: argparse.Namespace) -> int:
+    """Check phone/webhook alerts: send a test alert, or find your Telegram chat id."""
+    from insta_outreach.domain.enums import IncidentSeverity
+    from insta_outreach.notify import TelegramNotifier, WebhookNotifier, telegram_chats
+
+    cfg = load_settings(args.config).notifications
+    if args.alerts_action == "find-chat":
+        if cfg.telegram_bot_token is None:
+            print("set TELEGRAM_BOT_TOKEN in .env first (create a bot with @BotFather)", file=sys.stderr)
+            return 2
+        try:
+            chats = asyncio.run(telegram_chats(cfg.telegram_bot_token.get_secret_value()))
+        except RuntimeError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        if not chats:
+            print("No messages yet. Open your bot in Telegram, press Start (or send it anything), then run this again.")
+            return 1
+        for chat_id, name in chats:
+            print(f"TELEGRAM_CHAT_ID={chat_id}   # {name}")
+        return 0
+
+    title = "Test alert from insta-outreach"
+    detail = "If you can read this, alerts reach you. Real alerts: checkpoints, halted lanes, warm leads."
+    ok = True
+    if cfg.telegram_bot_token is not None and cfg.telegram_chat_id:
+        telegram = TelegramNotifier(
+            cfg.telegram_bot_token.get_secret_value(), cfg.telegram_chat_id, IncidentSeverity.INFO, cfg.dashboard_url
+        )
+        asyncio.run(telegram.notify(title, detail, IncidentSeverity.CRITICAL))
+        print(f"telegram: {'FAILED - ' + telegram.last_error if telegram.last_error else 'sent'}")
+        ok = ok and telegram.last_error is None
+    else:
+        print("telegram: not configured (TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID; see docs/DEPLOY.md)")
+    if cfg.webhook_url:
+        asyncio.run(
+            WebhookNotifier(cfg.webhook_url, IncidentSeverity.INFO).notify(title, detail, IncidentSeverity.CRITICAL)
+        )
+        print("webhook: posted (failures are logged above)")
+    else:
+        print("webhook: not configured (NOTIFY_WEBHOOK_URL)")
+    print(f"alerts at or above {cfg.min_severity.value} are sent; everything is also in the log and the audit trail")
+    return 0 if ok else 1
+
+
 def cmd_mock_site(args: argparse.Namespace) -> int:
     import uvicorn
 
@@ -432,18 +477,24 @@ def cmd_demo(args: argparse.Namespace) -> int:
     """Accelerated multi-day run against the simulated world (no Instagram, no network)."""
     from insta_outreach.verification import run_demo
 
-    asyncio.run(
-        run_demo(
-            Path(args.data_dir),
-            days=args.days,
-            mode=OperatingMode(args.mode.upper()),
-            checkpoint=args.checkpoint,
-            rate_limit=args.rate_limit,
-            human=args.human or None,
-            commenter=args.commenter or None,
-            use_llm=args.use_llm,
+    tick_seconds = args.tick_seconds if args.tick_seconds is not None else (1.0 if args.watch else 0.0)
+    try:
+        asyncio.run(
+            run_demo(
+                Path(args.data_dir),
+                days=args.days,
+                mode=OperatingMode(args.mode.upper()),
+                checkpoint=args.checkpoint,
+                rate_limit=args.rate_limit,
+                human=args.human or None,
+                commenter=args.commenter or None,
+                use_llm=args.use_llm,
+                watch_port=args.port if args.watch else None,
+                tick_seconds=tick_seconds,
+            )
         )
-    )
+    except KeyboardInterrupt:
+        print("\nstopped")
     return 0
 
 
@@ -522,6 +573,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--commenter", default="sim.smileline.dental", help="account that comments on our post on day 1")
     p.add_argument("--use-llm", action="store_true", help="use Claude for messages if credentials exist")
     p.add_argument("--data-dir", default="data/demo")
+    p.add_argument("--watch", action="store_true", help="serve Mission Control while the demo runs (slowed down)")
+    p.add_argument("--port", type=int, default=8765, help="port for --watch (default 8765)")
+    p.add_argument(
+        "--tick-seconds",
+        type=float,
+        help="real seconds per simulated 10 minutes (default 1 with --watch, otherwise 0)",
+    )
     p.set_defaults(fn=cmd_demo)
     p = sub.add_parser("scenario", help="deterministic self-checking scenario (compare with the expected transcript)")
     p.add_argument("--data-dir", default="data/scenario")
@@ -629,6 +687,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--target", help="probe: a profile to inspect read-only")
     p.add_argument("--query", help="probe: a search query to run read-only")
     p.set_defaults(fn=cmd_browser)
+    p = sub.add_parser("alerts", help="phone/webhook alerts: send a test, or find your Telegram chat id")
+    p.add_argument("alerts_action", choices=["test", "find-chat"])
+    p.set_defaults(fn=cmd_alerts)
     p = sub.add_parser("mock-site", help="run the mock Instagram UI for local browser demos")
     p.add_argument("--port", type=int, default=8899)
     p.set_defaults(fn=cmd_mock_site)
