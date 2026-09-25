@@ -42,6 +42,13 @@ def _app(args: argparse.Namespace) -> Any:
 
 # ------------------------------------------------------------------ commands
 def cmd_init(args: argparse.Namespace) -> int:
+    app = _prepare(args)
+    _print(app.control.status() | {"limits": "…"})
+    return 0
+
+
+def _prepare(args: argparse.Namespace) -> Any:
+    """Config file, data directories and database; returns the app."""
     target = Path(args.config or default_config_path())
     if not target.exists():
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -56,7 +63,48 @@ def cmd_init(args: argparse.Namespace) -> int:
         Path(directory).mkdir(parents=True, exist_ok=True)
     app = _app(args)
     print(f"database ready: {settings.resolved_database_url}")
-    _print(app.control.status() | {"limits": "…"})
+    return app
+
+
+def cmd_setup(args: argparse.Namespace) -> int:
+    """Prepare this computer: .env with a control token, config, Chromium, optional service file."""
+    import subprocess
+
+    from insta_outreach.deploy import current_service_plan, ensure_env_file
+
+    root = Path.cwd()
+    if not (root / "pyproject.toml").exists() or not (root / ".env.example").exists():
+        print("run this from the insta-outreach folder (where pyproject.toml is)", file=sys.stderr)
+        return 2
+    created, token = ensure_env_file(root)
+    print(f"{'created' if created else 'kept'} .env")
+    if token:
+        print(f"  CONTROL_API_TOKEN generated and saved in .env: {token}")
+        print("  (Mission Control asks for it once per browser tab; keep it private)")
+    load_dotenv(root / ".env")
+    _prepare(args)
+    if not args.no_browser:
+        print("installing Playwright's Chromium (first time: ~150 MB)...")
+        done = subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=False)
+        if done.returncode != 0:
+            print("Chromium install failed; on Linux try: python -m playwright install --with-deps chromium")
+            return 1
+    if args.service:
+        plan = current_service_plan(root)
+        (root / "data").mkdir(exist_ok=True)
+        for path, content in plan.files.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+            print(f"wrote {path}")
+        print("start it (and at every log-in):")
+        for command in plan.start:
+            print(f"  {command}")
+        print("stop it:")
+        for command in plan.stop:
+            print(f"  {command}")
+        print(f"logs:  {plan.logs}")
+    print("next: insta-outreach demo --watch --checkpoint   # Mission Control with simulated data")
+    print("      then docs/LIVE_CHECKLIST.md for the real account (browser login is yours to do)")
     return 0
 
 
@@ -542,6 +590,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("init", help="create config, data dirs and database").set_defaults(fn=cmd_init)
+    p = sub.add_parser("setup", help="prepare this computer: .env + control token, config, Chromium, service file")
+    p.add_argument("--service", action="store_true", help="also write a start-at-log-in service for this OS")
+    p.add_argument("--no-browser", action="store_true", help="skip installing Playwright's Chromium")
+    p.set_defaults(fn=cmd_setup)
     sub.add_parser("status", help="mode, lanes, counters").set_defaults(fn=cmd_status)
     p = sub.add_parser("mode", help="show or set the runtime operating mode")
     p.add_argument(
@@ -699,7 +751,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     load_dotenv()  # secrets from ./.env (never committed); real environment variables win
-    chatty = args.command in ("run", "serve", "tick", "browser", "init")
+    chatty = args.command in ("run", "serve", "tick", "browser", "init", "setup")
     narrated = args.command in ("demo", "scenario", "browser-demo")  # events are printed as narration
     logging.basicConfig(
         level=logging.DEBUG

@@ -33,17 +33,19 @@ Nothing is sent anywhere except to Instagram/Meta, to Anthropic when `ANTHROPIC_
 git clone https://github.com/RohitBagade/insta-outreach.git && cd insta-outreach
 python3 -m venv .venv && source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -e .
-python -m playwright install chromium
-cp .env.example .env                                         # then fill it in (LIVE_CHECKLIST Phase 1)
-insta-outreach init                                          # creates config/settings.yaml
+insta-outreach setup --service
 insta-outreach scenario --check                              # must print IDENTICAL
 ```
 
-Put a long random `CONTROL_API_TOKEN` in `.env`:
+`setup` does the following, and is safe to re-run:
 
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-```
+- creates `.env` from `.env.example`;
+- generates a long random `CONTROL_API_TOKEN` and prints it once. It never replaces one you already set;
+- creates `config/settings.yaml`, the data folders and the database;
+- installs Playwright's Chromium;
+- with `--service`, writes a start-at-log-in service for your OS (§4) using this folder's real paths, and prints the command to start it.
+
+The rest of `.env` is filled in during [LIVE_CHECKLIST](LIVE_CHECKLIST.md) Phase 1.
 
 ## 3. Start it and open Mission Control
 
@@ -87,7 +89,7 @@ It keeps serving until Ctrl+C.
 
 ## 4. Keep it running
 
-Pick the one for your computer. Each restarts the program if it crashes and starts it after a reboot and log-in.
+`insta-outreach setup --service` writes the right one of these for your computer and prints the start and stop commands. The templates below are for reference, or for doing it by hand. Each restarts the program if it crashes and starts it after a reboot and log-in. On Windows, `setup --service` writes `data\run-outreach.cmd` and prints a `schtasks` command that runs it at log-on. For restart-on-failure, also tick *If the task fails, restart every 1 minute* in the task's *Settings* tab ⚠.
 
 > If a start ever fails with `REFUSING TO START` (live + AUTONOMOUS while a preflight check fails, e.g. the browser session expired), run `insta-outreach mode APPROVAL`. The service then starts normally.
 

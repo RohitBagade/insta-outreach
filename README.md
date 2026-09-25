@@ -69,7 +69,7 @@ It narrates every event as it happens and ends with the commands to inspect the 
 Day-to-day use:
 
 ```bash
-.venv/bin/insta-outreach init                 # creates config/settings.yaml + database (local, OBSERVE)
+.venv/bin/insta-outreach setup --service      # .env with a control token, config, database, Chromium, start-at-log-in service
 .venv/bin/insta-outreach run                  # orchestrator + Mission Control on http://127.0.0.1:8765
 .venv/bin/insta-outreach mode APPROVAL        # change the runtime mode
 .venv/bin/insta-outreach approvals            # review drafts; approve / reject --redraft
