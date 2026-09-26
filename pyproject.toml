@@ -42,14 +42,14 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 markers = [
-  "browser: launches a real Chromium via Playwright against the local mock Instagram site",
+  "browser: launches a real Chromium via Playwright (mock Instagram site, Mission Control, voice agent page)",
 ]
 filterwarnings = ["ignore::DeprecationWarning:websockets.*"]
 
 [tool.ruff]
 line-length = 120
 target-version = "py311"
-src = ["src", "tests"]
+src = ["src", "tests", "."]  # "." for the top-level voice_agent package
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "ASYNC"]
@@ -66,7 +66,7 @@ extend-immutable-calls = ["fastapi.Body", "fastapi.Query", "fastapi.Depends", "f
 
 [tool.mypy]
 python_version = "3.11"
-packages = ["insta_outreach"]
+packages = ["insta_outreach", "voice_agent"]
 mypy_path = "src"
 warn_unused_ignores = true
 warn_redundant_casts = true

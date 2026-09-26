@@ -33,10 +33,10 @@ jobs:
 
       - name: Lint and format
         run: |
-          ruff check src tests
-          ruff format --check src tests
+          ruff check src tests voice_agent
+          ruff format --check src tests voice_agent
 
-      - name: Type check
+      - name: Type check (insta_outreach and voice_agent, see [tool.mypy])
         run: mypy
 
       - name: Tests (incl. real Chromium against the mock Instagram site)
