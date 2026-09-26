@@ -346,9 +346,9 @@ function addFeed(items, fresh) {
     if (fresh && it.node && (it.important || S.tech) && !pulsed.has(it.node)) { pulsed.add(it.node); pulse(it.node); }
     if (fresh && /^(action\.|message\.sent|reply\.|conversation\.|incident\.|lane\.)/.test(it.kind)) S.pendingTabRefresh = true;
   }
-  while (feed.children.length > 600) feed.lastChild.remove();
   updateEmpty();
   if (reading) { feed.scrollTop += feed.scrollHeight - before; S.unseen += shown; updatePill(); }
+  while (feed.children.length > 600) feed.lastChild.remove();  // after the correction above, so it can't skew it
 }
 async function pollFeed() {
   if (!S.cursor) {
