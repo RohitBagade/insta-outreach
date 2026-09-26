@@ -105,6 +105,20 @@ main { max-width: 1320px; margin: 0 auto; padding: 16px; display: grid; grid-tem
 .card { min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; box-shadow: var(--shadow); }
 .card-head { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; align-items: baseline; }
 
+/* right now ------------------------------------------------------------- */
+.now { border-left: 4px solid var(--good); }
+.now.warning { border-left-color: var(--warning); }
+.now.critical { border-left-color: var(--critical); }
+.now-head { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.now-head h1 { font-size: 20px; line-height: 1.35; font-weight: 600; margin: 0; flex: 1 1 320px; }
+.now-head .st { font-size: 13px; }
+.now-lines { margin: 8px 0 0; padding-left: 18px; color: var(--ink-2); }
+.now-lines li { margin: 2px 0; }
+.help { margin-top: 10px; font-size: 13px; color: var(--ink-2); }
+.help summary { cursor: pointer; color: var(--accent-ink); }
+.help ol { margin: 8px 0 0; padding-left: 20px; }
+.help li { margin: 3px 0; }
+
 /* status marks: icon + label, never colour alone ------------------------- */
 .st { display: inline-flex; gap: 5px; align-items: center; font-size: 12px; font-weight: 600; }
 .st::before { content: "●"; font-size: 11px; }
@@ -128,6 +142,7 @@ main { max-width: 1320px; margin: 0 auto; padding: 16px; display: grid; grid-tem
 .node .sub { font-size: 12px; color: var(--ink-2); margin-top: 2px; }
 .node .sub b { font-weight: 600; color: var(--ink); }
 .node.alert { border-color: var(--critical); }
+.node.attn { border-color: var(--accent); }
 .node.pulse { animation: pulse 1.2s ease-out; }
 @keyframes pulse {
   0% { box-shadow: 0 0 0 0 var(--accent); border-color: var(--accent); }
@@ -157,7 +172,16 @@ main { max-width: 1320px; margin: 0 auto; padding: 16px; display: grid; grid-tem
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chips button { font-size: 12px; padding: 2px 10px; border-radius: 999px; }
 .chips button.on { border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
-.feed { list-style: none; margin: 8px 0 0; padding: 0; max-height: 520px; overflow-y: auto; }
+.feed-wrap { position: relative; }
+.feed { list-style: none; margin: 8px 0 0; padding: 0; max-height: 520px; overflow-y: auto; overflow-anchor: none; }
+.feed .tech { display: none; }
+.feed.tech .tech { display: inline; }
+.feed.tech .plain { display: none; }
+.new-pill {
+  position: absolute; top: 4px; left: 50%; transform: translateX(-50%); z-index: 2;
+  background: var(--accent); border-color: var(--accent); color: #fff; border-radius: 999px; font-size: 12px; padding: 3px 12px;
+}
+.tech-toggle { font-size: 12px; color: var(--ink-2); display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
 .feed li { display: grid; grid-template-columns: 84px 18px minmax(0, 1fr); gap: 6px; padding: 6px 2px; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
 .feed li:first-child { border-top: 0; }
 .feed li.new { animation: fadein 1.4s ease-out; }
@@ -214,6 +238,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .bubble.out { justify-self: end; background: var(--bubble-out); }
 .bubble.in { justify-self: start; background: var(--bubble-in); }
 .bubble .meta { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.trail-box summary { cursor: pointer; color: var(--accent-ink); font-size: 13px; margin-bottom: 8px; }
 pre.trail { white-space: pre-wrap; font-size: 12px; line-height: 1.5; background: var(--page); border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin: 0; }
 
 dialog { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); max-width: 420px; }
@@ -224,7 +249,8 @@ dialog input { width: 100%; margin: 8px 0; }
 }
 .toast.error { background: var(--critical); color: #fff; }
 @media (max-width: 600px) {
-  .top { padding: 8px 16px; }
+  .now-head h1 { font-size: 17px; }
+  .top { position: static; padding: 8px 16px; }  /* a 3-row header must not cover a phone screen */
   .attention { padding: 8px 16px; }
   .modes button { padding: 6px 9px; }
   .node .value { font-size: 22px; }

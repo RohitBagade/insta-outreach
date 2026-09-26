@@ -395,6 +395,7 @@ class ControlService:
                 kind="lane.halted",
                 subject=f"lane:{channel.value}",
                 summary=f"{channel.value} lane halted manually by {by}: {reason}",
+                reason=reason,
             )
 
     # -- conversations -------------------------------------------------------------------
@@ -533,6 +534,7 @@ class ControlService:
                 + ("" if created else f" (already known, status {lead.status.value})")
                 + (f": {note}" if note else ""),
                 lead_id=lead.id,
+                note=note,
             )
             return lead_dict(lead) | {"created": created}
 
