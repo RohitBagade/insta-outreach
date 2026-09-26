@@ -102,7 +102,10 @@ def service_plan(platform: str, root: Path, python: Path, home: Path) -> Service
         )
     if platform == "win32":
         launcher = root / "data" / "run-outreach.cmd"
-        content = f'@echo off\r\ncd /d "{root}"\r\n"{python}" -m insta_outreach run >> "{log}" 2>&1\r\n'
+        # UTF-8 mode: the log file is not a console, and prospects' messages can contain emoji.
+        content = (
+            f'@echo off\r\nset PYTHONUTF8=1\r\ncd /d "{root}"\r\n"{python}" -m insta_outreach run >> "{log}" 2>&1\r\n'
+        )
         return ServicePlan(
             platform,
             {launcher: content},

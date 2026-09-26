@@ -749,6 +749,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:  # never crash on a character (emoji) the terminal cannot encode
+            reconfigure(errors="backslashreplace")
     args = build_parser().parse_args(argv)
     load_dotenv()  # secrets from ./.env (never committed); real environment variables win
     chatty = args.command in ("run", "serve", "tick", "browser", "init", "setup")
