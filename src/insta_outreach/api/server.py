@@ -18,6 +18,7 @@ import contextlib
 import hmac
 import json
 import logging
+import os
 import socket
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -337,7 +338,8 @@ class BackgroundServer:
         import uvicorn
 
         with socket.socket() as probe:  # a clear message instead of uvicorn exiting the process
-            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if os.name != "nt":  # on Windows SO_REUSEADDR would let the probe share a busy port
+                probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 probe.bind((host, port))
             except OSError as exc:
