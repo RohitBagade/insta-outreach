@@ -15,57 +15,72 @@
     <span class="muted" id="account"></span>
   </div>
   <div class="modes" role="group" aria-label="Operating mode" id="modes">
-    <button data-mode="OBSERVE" title="Discover and analyse only; never prepares or sends">Observe</button>
-    <button data-mode="DRAFT" title="Writes messages, never sends">Draft</button>
-    <button data-mode="APPROVAL" title="Sends only what you approve">Approval</button>
-    <button data-mode="AUTONOMOUS" title="Sends automatically within every limit">Autonomous</button>
+    <button data-mode="OBSERVE" title="Finds and checks businesses. Never writes or sends anything.">Observe</button>
+    <button data-mode="DRAFT" title="Also writes messages for you to read. Never sends.">Draft</button>
+    <button data-mode="APPROVAL" title="Sends only the messages you approve.">Approval</button>
+    <button data-mode="AUTONOMOUS" title="Sends on its own, within every limit.">Autonomous</button>
   </div>
   <div class="right">
     <button id="pause" class="pause">Pause all</button>
-    <span class="conn" id="conn" title="Connection to the orchestrator">● connecting</span>
-    <span class="clock" id="clock" title="Orchestrator clock"></span>
+    <span class="conn" id="conn" title="Connection to the program">● connecting</span>
+    <span class="clock" id="clock" title="The program's clock"></span>
   </div>
 </header>
 
 <div class="attention" id="attention" hidden></div>
 
 <main>
-  <section class="card flow-card">
-    <div class="card-head">
-      <h2>Workflow <span class="muted small">live: every lead, every step</span></h2>
-      <span class="muted small" id="flowNote"></span>
+  <section class="card now" id="now">
+    <div class="now-head">
+      <span id="nowMark"></span>
+      <h1 id="nowText">Loading…</h1>
     </div>
-    <div class="flow" id="flow"></div>
+    <ul class="now-lines" id="nowLines"></ul>
+    <details class="help">
+      <summary>How to read this page</summary>
+      <ol>
+        <li><b>Right now</b> (this box) says in one sentence what the bot is doing.</li>
+        <li><b>The five boxes</b> are your funnel: businesses found → good fit → messaged → replied → handed to you. Click a box to see the list.</li>
+        <li><b>The coloured strip</b> at the top appears only when something needs you: an approval, a reply or an Instagram problem.</li>
+        <li><b>What's happening</b> is a plain-English diary, newest first. Tick <i>Technical details</i> to also see every search, profile check and inbox read.</li>
+        <li>Click any <b>@name</b> to see the chat and why the bot did each thing.</li>
+      </ol>
+    </details>
+  </section>
+
+  <section class="card">
+    <div class="flow" id="flow" aria-label="Funnel"></div>
   </section>
 
   <div class="split">
     <section class="card feed-card">
       <div class="card-head">
-        <h2>Live activity</h2>
+        <h2>What's happening</h2>
         <div class="chips" id="feedFilters">
-          <button data-filter="all" class="on">All</button>
-          <button data-filter="sends">Sends</button>
-          <button data-filter="decisions">Decisions</button>
-          <button data-filter="people">Replies &amp; people</button>
-          <button data-filter="incidents">Incidents</button>
-          <button data-filter="agent">Agent activity</button>
+          <button data-filter="all" class="on">Everything</button>
+          <button data-filter="messages">Messages</button>
+          <button data-filter="replies">Replies</button>
+          <button data-filter="problems">Problems</button>
         </div>
+        <label class="tech-toggle"><input type="checkbox" id="techToggle"> Technical details</label>
       </div>
-      <ol class="feed" id="feed" aria-live="polite"></ol>
+      <div class="feed-wrap">
+        <button class="new-pill" id="newPill" hidden>↑ new</button>
+        <ol class="feed" id="feed" aria-live="polite"></ol>
+      </div>
     </section>
 
     <aside class="side">
       <section class="card">
         <h2>Today's limits</h2>
         <div id="meters"></div>
-        <p class="small muted" id="sendWindow"></p>
       </section>
       <section class="card">
-        <h2>Lanes</h2>
+        <h2>Instagram connections</h2>
         <div id="lanes"></div>
       </section>
       <section class="card">
-        <h2>Go-live readiness</h2>
+        <h2>Go-live checks</h2>
         <div id="preflight" class="small"></div>
       </section>
     </aside>
@@ -73,11 +88,11 @@
 
   <section class="card">
     <div class="tabs" role="tablist" id="tabs">
-      <button data-tab="approvals" class="on">Approvals <span class="count" id="c-approvals"></span></button>
-      <button data-tab="incidents">Incidents <span class="count" id="c-incidents"></span></button>
-      <button data-tab="conversations">Conversations <span class="count" id="c-conversations"></span></button>
-      <button data-tab="leads">Leads</button>
-      <button data-tab="audit">Audit trail</button>
+      <button data-tab="approvals" class="on">Waiting for approval <span class="count" id="c-approvals"></span></button>
+      <button data-tab="conversations">Chats <span class="count" id="c-conversations"></span></button>
+      <button data-tab="leads">Businesses found</button>
+      <button data-tab="incidents">Problems <span class="count" id="c-incidents"></span></button>
+      <button data-tab="audit">History (technical)</button>
     </div>
     <div id="tab" class="tab-body"></div>
   </section>
@@ -94,7 +109,7 @@
 <dialog id="tokenDialog">
   <form method="dialog">
     <h2>Control token</h2>
-    <p class="small muted">This console needs the <code>CONTROL_API_TOKEN</code> from your <code>.env</code>. It is kept only for this browser tab.</p>
+    <p class="small muted">Paste the <code>CONTROL_API_TOKEN</code> from the <code>.env</code> file in your project folder. This browser tab keeps it until you close it.</p>
     <input id="tokenInput" type="password" autocomplete="off" placeholder="paste token">
     <div class="row"><button value="ok" class="primary">Save</button></div>
   </form>

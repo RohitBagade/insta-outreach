@@ -58,16 +58,19 @@ This starts the orchestrator plus **Mission Control** at <http://127.0.0.1:8765>
 | Area | What it shows | What you can do |
 |---|---|---|
 | **Header** | environment (SIMULATION / LIVE), account, mode, connection, clock | switch mode (OBSERVE, DRAFT, APPROVAL, AUTONOMOUS), **Pause all** |
-| **Attention strip** | halted lanes, critical incidents, messages waiting for you, conversations that are yours | jump straight to each |
-| **Workflow** | Discover → Analyze → Qualified → Draft → Gate → Send → Conversations, with live counts. A step pulses when something happens in it. The Gate shows *why* queued messages wait (send hours, caps, pacing). Send shows both lanes. | click a step to open its list |
-| **Live activity** | every decision, send, reply, handoff, incident and lane change, plus every agent action (discovery searches, profile inspections, inbox reads) | filter: Sends, Decisions, Replies & people, Incidents, Agent activity; click a handle for its full story |
-| **Today's limits** | usage vs caps, computed exactly as the gate enforces them; whether sending is allowed now, and when the next send may happen | – |
-| **Lanes** | Official API and Browser agent: ACTIVE / COOLDOWN / HALTED, and why | Halt, Resume (after *you* resolved the problem on Instagram) |
-| **Go-live readiness** | the `preflight` checks that gate live AUTONOMOUS | – |
-| **Approvals** | every message waiting for you, with the facts it uses | edit, approve, reject & redraft, reject |
-| **Incidents** | checkpoints, rate limits, restrictions, with the **screenshot** and page URL | resume the lane once resolved |
-| **Conversations** | who owns each conversation (automation or you) | take over, hand back |
-| **Lead drawer** | the conversation as chat bubbles, and the full decision trail | take over, never contact |
+| **Needs-you strip** | appears only when something needs you: Instagram stopped the browser, messages waiting for approval, chats handed to you | jump straight to each; **Resume…** |
+| **Right now** | one plain sentence on what the bot is doing, today's sends vs the limit, sending hours, and why anything is waiting | open *How to read this page* |
+| **Funnel** | Found → Good fit → Messaged → Replied → With you, with live counts. A box pulses when something happens in it. | click a box to see the list |
+| **What's happening** | a plain-English diary, newest first: messages sent, replies (quoted), handoffs, new businesses found, Instagram problems. Scrolling down to read stops new events pushing the list; a "↑ new" button brings you back. | filter: Messages, Replies, Problems; tick **Technical details** to also see every search, profile check and inbox read; click any @name |
+| **Today's limits** | usage vs caps, computed exactly as the gate enforces them | – |
+| **Instagram connections** | Official API and Browser: working / resting / stopped, and why | Stop, Resume (after *you* fixed the problem on Instagram) |
+| **Go-live checks** | the `preflight` checks that gate live AUTONOMOUS | – |
+| **Waiting for approval** | every message waiting for you, with the facts it is based on | edit, approve, reject & rewrite, reject |
+| **Chats** | who handles each chat: the bot or you | take over, hand back to the bot |
+| **Businesses found** | every business, its score and status in plain words | filter by status |
+| **Problems** | checkpoints, rate limits, restrictions, with the **screenshot** and page URL | resume once fixed |
+| **History (technical)** | the complete audit trail | filter by event type |
+| **@name drawer** | the chat as bubbles, and step by step why the bot did what it did | take over, never contact |
 
 Every button goes through the same audited control service as the CLI. The audit trail records who did what, and nothing on the page can skip a safety check.
 

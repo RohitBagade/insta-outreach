@@ -77,12 +77,12 @@ Day-to-day use:
 
 ### Mission Control: see everything, live
 
-`http://127.0.0.1:8765` is a live view of the whole system, refreshed every 1.5 seconds:
+`http://127.0.0.1:8765` is a live view of the whole system in plain English, refreshed every 1.5 seconds:
 
-- **Workflow:** Discover → Analyze → Qualified → Draft → Gate → Send → Conversations, with counts. A step pulses when something happens in it, and the Gate shows why queued messages are waiting.
-- **Live activity:** every decision, send, reply, handoff, incident and lane change. It also shows what the agent itself does: searches, profile inspections, inbox reads.
-- **Limits:** today's usage against every cap, computed exactly like the gate computes it, and when the next send may happen.
-- **Lanes, incidents** (with the checkpoint screenshot) and **go-live readiness**.
+- **Right now:** one sentence on what the bot is doing, today's sends against the limit, and why anything is waiting.
+- **Funnel:** Found → Good fit → Messaged → Replied → With you, with live counts.
+- **What's happening:** a plain-English diary of sends, replies, handoffs, new businesses found and Instagram problems. Tick *Technical details* to also see every search, profile check and inbox read.
+- **Limits, Instagram connections, problems** (with the checkpoint screenshot) and **go-live checks**.
 - **Controls:**
   - approve, edit or reject messages;
   - take over or hand back a conversation;

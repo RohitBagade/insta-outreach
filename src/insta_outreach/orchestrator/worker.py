@@ -415,6 +415,7 @@ class ExecutionWorker:
                 action_id=action.id,
                 channel=outcome.channel,
                 capability=action.capability,
+                message_kind=action.message_kind,
                 approved_by=action.approved_by,
                 code=outcome.code,
                 message_sha256=action.message_sha256,

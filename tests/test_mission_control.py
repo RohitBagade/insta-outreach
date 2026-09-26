@@ -5,14 +5,16 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from insta_outreach.api.server import create_api
 from insta_outreach.domain.enums import Channel, OperatingMode
+from insta_outreach.orchestrator.monitor import plain_event
 from insta_outreach.policy import usage as u
-from insta_outreach.storage.models import AuditEvent
+from insta_outreach.storage.models import AuditEvent, Lead
 from insta_outreach.util.clock import local_day_start
 from tests.conftest import run_ticks
 
@@ -130,3 +132,47 @@ async def test_explain_endpoint_returns_the_decision_trail(make_app, clock) -> N
         f"/api/actions/{pending[0]['id']}/approve", json={"edited_text": edited}, headers=AUTH
     ).json()
     assert approved["status"] == "APPROVED" and approved["message"] == edited.strip()
+
+
+PLAIN_CASES = [  # kind, subject, detail, expected start of the title, shown in the simple view
+    ("message.sent", "@a", {"capability": "private_reply"}, "Replied privately to @a's comment", True),
+    ("message.sent", "@a", {"message_kind": "followup"}, "Sent a follow-up to @a", True),
+    ("message.sent", "@a", {"message_kind": "initial"}, "Sent a first message to @a", True),
+    ("reply.handled", "@a", {"intent": "INTERESTED", "reply": "yes"}, "@a replied: \u201cyes\u201d. Your turn", True),
+    ("reply.handled", "@a", {"intent": "OPT_OUT", "reply": "stop"}, "@a said no: \u201cstop\u201d.", True),
+    ("conversation.human_owned", "@a", {"reason": "handed off: prospect replied"}, "The chat with @a", False),
+    ("conversation.human_owned", "@a", {"reason": "human replied from the app"}, "You messaged @a", True),
+    ("lane.halted", "lane:BROWSER", {"status": "CHECKPOINT_REQUIRED"}, "Instagram asked to confirm it's you", True),
+    ("lane.halted", "lane:API", {"reason": "maintenance"}, "The official API was stopped by hand: maint", True),
+    ("action.proposed", "@a", {"status": "APPROVED"}, "Queued a message for @a", False),
+    ("action.proposed", "@a", {"status": "PENDING_APPROVAL"}, "A message for @a is waiting for your", True),
+    ("lead.added", "@a", {"note": "met at expo"}, "You added @a (note: met at expo)", True),
+    ("incident.opened", "lane:BROWSER", {}, "technical summary", False),
+]
+
+
+@pytest.mark.parametrize(("kind", "subject", "detail", "title", "important"), PLAIN_CASES)
+def test_plain_titles(kind: str, subject: str, detail: dict, title: str, important: bool) -> None:
+    text, shown = plain_event(kind, subject, "technical summary", detail)
+    assert text.startswith(title) and shown is important
+
+
+async def test_simple_feed_hides_chores_and_funnel_adds_up(make_app, clock) -> None:
+    app = make_app()
+    app.runtime.set_mode(OperatingMode.AUTONOMOUS, "test")
+    await run_ticks(app, clock, 60)
+    items = app.monitor.feed(limit=500)["items"]
+    assert all(item["title"] for item in items)
+    chores = [i for i in items if i["kind"] in ("exec.sync_inbox", "exec.inspect_profile", "action.proposed")]
+    assert chores and not any(i["important"] for i in chores)
+    found = [i for i in items if i["kind"] == "exec.discover" and i["important"]]
+    assert found and all(i["title"].startswith("Found ") for i in found)
+    sent = [i for i in items if i["kind"] == "message.sent"]
+    assert sent and all(i["important"] and i["title"].startswith(("Sent", "Replied")) for i in sent)
+
+    f = app.monitor.overview()["funnel"]
+    with app.db.session() as session:
+        contacted = session.scalar(select(func.count()).select_from(Lead).where(Lead.contacted_at.is_not(None)))
+    assert f["messaged"] == contacted > 0
+    assert f["found"] >= f["good_fit"] >= f["messaged"] >= f["replied"]
+    assert f["found"] == f["good_fit"] + f["checking"] + f["not_fit"] + f["duplicates"] + f["no_need"]

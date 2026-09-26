@@ -53,7 +53,15 @@ async def test_dashboard_renders_and_drives_the_control_plane(make_app, clock) -
             assert "SIMULATION" in await text(page, "#env")
             assert await text(page, "#modes button.on") == "Approval"
             overview = app.monitor.overview()
-            assert await text(page, "#node-discover .value") == str(overview["pipeline"]["discover"]["total"])
+            assert await text(page, "#node-discover .value") == str(overview["funnel"]["found"])
+            assert await text(page, "#nowText") == "Sending only the messages you approve."
+
+            # Simple view by default: plain sentences, the agent's routine chores hidden.
+            chore = page.locator("#feed li[data-important='0']").first
+            await expect(chore).to_be_hidden()
+            await page.locator("#techToggle").check()
+            await expect(chore).to_be_visible()
+            await page.locator("#techToggle").uncheck()
 
             # The hostile note is shown literally and never executed.
             await page.wait_for_selector("#feed li[data-kind='lead.added']")
@@ -68,21 +76,25 @@ async def test_dashboard_renders_and_drives_the_control_plane(make_app, clock) -
             await expect(page.locator("#toast")).to_have_text("Approved")
             approved = app.control.list_actions([ActionStatus.APPROVED], limit=500)
             assert len(approved) == 1 and approved[0]["approved_by"] == "human:local"
+            await expect(page.locator("#feed li[data-kind='action.approved']")).to_contain_text(
+                f"You approved the message to @{approved[0]['target_username']}"
+            )
 
             # Halt the browser lane, see it flagged, resume it.
-            await page.locator("#lanes .lane", has_text="Browser agent").locator("button.danger").click()
+            await page.locator("#lanes .lane", has_text="Browser").locator("button.danger").click()
             await page.wait_for_selector("#attention .item.critical")
-            assert "BROWSER lane halted" in await text(page, "#attention")
+            assert "the browser is stopped" in await text(page, "#attention")
+            await expect(page.locator("#nowMark")).to_have_text("Needs you")
             assert lane_state(app, "BROWSER") == "HALTED"
             await page.locator("#attention button", has_text="Resume").click()
-            await expect(page.locator("#toast")).to_have_text("BROWSER lane resumed")
-            await expect(page.locator("#attention")).not_to_contain_text("halted")
+            await expect(page.locator("#toast")).to_have_text("Browser resumed")
+            await expect(page.locator("#attention")).not_to_contain_text("stopped")
             assert lane_state(app, "BROWSER") == "ACTIVE"
 
             # A lead's full decision trail opens in the drawer.
             await page.locator("#tab .item a.link").first.click()
-            await page.wait_for_selector("#drawer pre.trail")
-            assert "HOW IT WAS FOUND" in await text(page, "#drawer pre.trail")
+            await page.locator("#drawer details.trail-box summary").click()
+            await expect(page.locator("#drawer pre.trail")).to_contain_text("HOW IT WAS FOUND")
         finally:
             await browser.close()
             await server.stop()
