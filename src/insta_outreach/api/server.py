@@ -48,7 +48,11 @@ from insta_outreach.webhooks import verify_signature
 log = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).with_name("static")
-_STATIC_TYPES = {"app.js": "text/javascript; charset=utf-8", "app.css": "text/css; charset=utf-8"}
+_STATIC_TYPES = {
+    "app.js": "text/javascript; charset=utf-8",
+    "pages.js": "text/javascript; charset=utf-8",
+    "app.css": "text/css; charset=utf-8",
+}
 _PAGE_HEADERS = {
     "Content-Security-Policy": (
         "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; "
@@ -95,7 +99,15 @@ def create_api(app: App, run_orchestrator: bool = False, restarter: Restarter | 
         finally:
             stop.set()
             if task is not None:
-                await task
+                # A step in progress may be pacing itself for minutes: give it a moment to
+                # finish, then interrupt it (interrupted actions are recovered at the next
+                # start, and a send re-checks the thread first, so nothing is sent twice).
+                try:
+                    await asyncio.wait_for(asyncio.shield(task), timeout=10)
+                except TimeoutError:
+                    task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await task
             await app.close()
 
     api = FastAPI(title="insta-outreach control plane", version="0.1.0", lifespan=lifespan)
@@ -215,13 +227,16 @@ def create_api(app: App, run_orchestrator: bool = False, restarter: Restarter | 
 
     @api.get("/api/actions")
     async def actions(
-        status: list[str] = Query(default=[]), limit: int = 50, _: str = Depends(require_token)
+        status: list[str] = Query(default=[]),
+        limit: int = 50,
+        with_lead: bool = False,
+        _: str = Depends(require_token),
     ) -> list[dict[str, Any]]:
         try:
             statuses = [ActionStatus(s.upper()) for s in status]
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return app.control.list_actions(statuses or None, limit)
+        return app.control.list_actions(statuses or None, limit, with_lead=with_lead)
 
     @api.get("/api/actions/{action_id}")
     async def action_detail(action_id: str, _: str = Depends(require_token)) -> dict[str, Any]:

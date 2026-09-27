@@ -673,6 +673,10 @@ async def run_browser_demo(data_dir: Path, headed: bool = False, echo: bool = Tr
     config = write_inspection_config(
         settings, {"browser": {"enabled": True, "base_url": base, "allowed_hosts": ["127.0.0.1"]}}
     )
+    # The mock site needs no password; the saved profile stands in for your own first login
+    # (the bot does no browser work on a real account before it).
+    settings.browser_profile(Channel.BROWSER).mkdir(parents=True, exist_ok=True)
+    (settings.browser_profile(Channel.BROWSER) / "Local State").write_text("{}", encoding="utf-8")
     clock = FakeClock(START)
     notes = CollectingNotifier()
     app = build_app(settings, clock=clock, llm=NullLLM(), notifier=notes)

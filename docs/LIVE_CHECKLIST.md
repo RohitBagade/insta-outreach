@@ -1,12 +1,8 @@
 # Live integration checklist for @lemmedeliver
 
-Work through the phases in order and tick each box. Every phase ends with a **pass condition**. Do not start the next phase until it holds. The system enforces the most important one itself: AUTONOMOUS is refused for the live account until `insta-outreach preflight` passes (see [VERIFY.md §5](VERIFY.md#5-modes-and-why-autonomous-cannot-run-live-without-credentials)).
+Work through the phases in order and tick each box. Every phase ends with a **pass condition**. Do not start the next phase until it holds. The system enforces the most important one itself: AUTONOMOUS is refused for the live account until every go-live check passes (Mission Control → Settings → *Go-live checks*; see [VERIFY.md §5](VERIFY.md#5-modes-and-why-autonomous-cannot-run-live-without-credentials)).
 
-> **Risk, once more.** Instagram's Terms of Use prohibit automated access without Meta's permission. The browser lane automates the normal web UI, so the account can be rate-limited, checkpointed or restricted. The API-only features (replies within 24 h, private replies to comments, webhooks) are within Meta's rules.
-
-> **About the Meta steps.** Meta's documentation site was blocked from the environment where this was built. The steps below come from search snippets of Meta's pages and Meta's official Postman collection (sources in [RESEARCH.md](RESEARCH.md#sources)). Menu names in the Meta dashboard and the Instagram app change often, so items marked ⚠ need checking against what you see.
-
----
+**Everything below is done in Mission Control.** Start it by double-clicking the *Mission Control* file that `insta-outreach setup` put in the project folder (`Mission Control.cmd` on Windows). It opens the page and signs you in. Closing its window stops the program. Each step also names the command-line equivalent, in case you prefer a terminal.
 
 ## Phase 0: accounts and machine
 
@@ -18,74 +14,46 @@ Work through the phases in order and tick each box. Every phase ends with a **pa
   - [ ] a bio naming a niche and a target location plus a manual booking method, e.g. `Test café in Thane · DM to book`;
   - [ ] **no** link in bio;
   - [ ] at least one post.
-  - The sandbox config below lowers `min_followers` to 0, so a new account qualifies.
-- [ ] **Run everything on your own computer** (macOS / Windows / Linux with a screen). The first login opens a visible browser window. Keep `data/` on that machine: it holds the session cookies.
+  - Phase 1 lowers *Fewest followers worth a message* to 0, so a new account qualifies.
+- [ ] **Run everything on your own computer** (macOS / Windows / Linux with a screen). The login window opens on the computer running the program. Keep `data/` on that machine: it holds the session cookies.
 - [ ] **Setup verified.** You completed [VERIFY.md](VERIFY.md) §1: `scenario --check` says IDENTICAL, `pytest -q` passes.
 
-## Phase 1: credentials and where they go
+## Phase 1: credentials, and switching to your real account
 
 | Credential | Needed for | Where it goes |
 |---|---|---|
-| Your Instagram login for @lemmedeliver | browser lane | **Nowhere in files.** You type it yourself in the window opened by `insta-outreach browser login`. Only the resulting session cookies are stored, in `data/browser_profiles/lemmedeliver/`. |
-| `CONTROL_API_TOKEN` | required in live (kill switch, approvals, Mission Control) | `.env` in the repository root. Generate one: `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
-| `IG_ACCESS_TOKEN` | API lane (optional, Phase 3) | `.env` |
-| `IG_USER_ID` | API lane: the Instagram professional account id | `.env` |
+| Your Instagram login for @lemmedeliver | browser lane | **Nowhere in files.** You type it yourself in the window opened by *Log in…* (Settings → *Instagram accounts*). Only the resulting session cookies are stored, in `data/browser_profiles/lemmedeliver/`. |
+| `CONTROL_API_TOKEN` | required in live (kill switch, approvals, Mission Control) | `.env` in the project folder. `insta-outreach setup` creates it. |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | optional: checkpoint and warm-lead alerts on your phone | Settings → *Phone alerts* writes them to `.env` for you ([DEPLOY.md §6](DEPLOY.md#6-alerts-on-your-phone-telegram)). |
+| `IG_ACCESS_TOKEN`, `IG_USER_ID` | API lane (optional, Phase 3) | `.env` |
 | `IG_APP_SECRET` | verifying webhook signatures | `.env` |
 | `IG_WEBHOOK_VERIFY_TOKEN` | webhook handshake: any random string you choose | `.env` |
 | `ANTHROPIC_API_KEY` | optional: Claude writes the messages; without it, validated templates are used | `.env` |
 | `NOTIFY_WEBHOOK_URL` | optional: incidents and warm leads posted to n8n / Slack relay | `.env` |
-| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | optional: checkpoint and warm-lead alerts on your phone ([DEPLOY.md §6](DEPLOY.md#6-alerts-on-your-phone-telegram)) | `.env` |
-| `DASHBOARD_URL` | optional: your Tailscale address for Mission Control, linked in every alert | `.env` |
+| `DASHBOARD_URL` | optional: your Tailscale address for Mission Control, linked in every alert | Settings → *Phone alerts* → *Mission Control link*, or `.env` |
 
-- [ ] **Create `.env`.** Run `cp .env.example .env`, then fill in `CONTROL_API_TOKEN`.
-  - The CLI loads `.env` automatically; variables already set in your shell win.
-  - `.env` is git-ignored.
-- [ ] **Create `config/settings.yaml`.** Run `insta-outreach init`, then replace its content with the **sandbox config**:
+- [ ] **Switch to your real account in test mode.** Settings → *Where it runs* → **Switch to my real Instagram…**:
+  - *Test mode*: enter your test account's username. Outbound messages to any other handle become impossible.
+  - Keep **Don't look for new businesses yet** ticked: no searching at all during the sandbox.
+  - Keep **Show the browser window** ticked to watch the first tests.
+  - Press *Switch and restart*. The program restarts on your real account, in **Observe** mode: it sends nothing.
+- [ ] **Sandbox limits.** Settings → *Daily limits*: *First messages per day* 1, *First messages per hour* 1, *Follow-ups per business* 0. Settings → *Your messages*: *Fewest followers worth a message* 0, so a brand-new test account can qualify.
+- [ ] **Check:** Settings → *Test mode* shows `only @YOUR_TEST_ACCOUNT`; *Safety rules* → *Show every safety rule* lists `new conversations: 1/day, 1/hour`.
 
-```yaml
-environment: live
-default_mode: OBSERVE
-data_dir: data
+Settings you change in Mission Control are saved in `config/settings.dashboard.yaml`, next to `settings.yaml` (which is never rewritten). Delete that file to go back to `settings.yaml` alone. Command line alternative: edit `config/settings.yaml` (sandbox values: `environment: live`, `browser.enabled: true`, `campaigns: []`, `rollout.allowed_targets: [YOUR_TEST_ACCOUNT]`, `scoring.min_followers: 0`, `limits.outreach_per_day: 1`), then `insta-outreach safety`.
 
-account:
-  id: lemmedeliver
-  username: lemmedeliver
-
-browser:
-  enabled: true
-  headless: false            # watch the browser during the first tests
-api:
-  enabled: false             # switch on in Phase 3
-
-campaigns: []                # sandbox: no discovery at all
-rollout:
-  allowed_targets: [YOUR_TEST_ACCOUNT]   # outbound is IMPOSSIBLE to any other handle
-scoring:
-  min_followers: 0           # so a brand-new test account can qualify
-limits:
-  outreach_per_day: 1
-  outreach_per_hour: 1
-  max_followups_per_lead: 0  # no follow-ups during the sandbox test
-```
-
-- [ ] **Check:** `insta-outreach safety` shows `sandbox allowlist (rollout.allowed_targets): @YOUR_TEST_ACCOUNT` and `new conversations: 1/day, 1/hour`.
-
-**Pass condition:** `insta-outreach preflight` shows `control_token PASS`. `browser_session` and `approved_sends` still FAIL, which is expected at this point.
+**Pass condition:** Settings → *Go-live checks* shows *Control token* ok. *Instagram login* and *Messages you approved* are *not yet*: expected at this point. Until you log in, the bot leaves the browser alone and the dashboard says **Log in to Instagram to start**.
 
 ## Phase 2: browser session
 
-- [ ] **Log in.** Run `insta-outreach browser login`. A Chromium window opens on Instagram's login page.
-  - Log in to @lemmedeliver **yourself**, including 2FA or any "confirm it's you" step. The tool never types credentials and never answers security checks.
-  - The command ends with `logged in; session saved in data/browser_profiles/lemmedeliver`.
-- [ ] **Probe (read-only).** Run `insta-outreach browser probe --target YOUR_TEST_ACCOUNT --query "cafe Thane"`. It opens pages but never messages anyone. Check that:
-  - [ ] `session.state` is `ok`;
-  - [ ] the extracted profile fields match what you see on Instagram: name, bio, category, followers, posts, website none, private false;
-  - [ ] `intents` shows `profile.message_button` resolved;
-  - [ ] `search.candidates` contains real accounts.
-  - Any mismatch is UI drift: stop and share the output. The fix is a selector override in a YAML `ui_map`, not a code change.
-- [ ] **Preflight.** Run `insta-outreach preflight`. `browser_session` should now be PASS. Login and probe both record a verified session.
+- [ ] **Log in.** Settings → *Instagram accounts* → **Log in…** next to @lemmedeliver. A Chromium window opens on Instagram's login page, on the computer running the program.
+  - Log in to @lemmedeliver **yourself**, including 2FA or any "confirm it's you" step. The program never types credentials and never answers security checks.
+  - The window closes by itself once the home feed loads; the account shows *Done. logged in; session saved…*.
+- [ ] **Test the login (read-only).** Press **Test login**. It opens @lemmedeliver's own profile through the normal lane, with the normal pacing, and never messages anyone. Expect *The login works*.
+- [ ] **Optional deeper check (command line).** `insta-outreach browser probe --target YOUR_TEST_ACCOUNT --query "cafe Thane"` also compares the profile fields it reads with what you see on Instagram (name, bio, category, followers, website, message button) and runs a search. Any mismatch is UI drift: stop and share the output. The fix is a selector override in a YAML `ui_map`, not a code change.
+- [ ] **Go-live checks.** *Instagram login (your account)* is now ok. Login and Test login both record a verified session.
 
-**Pass condition:** the probe output matches reality. `preflight` shows only `approved_sends` failing.
+**Pass condition:** Test login says the login works; *Go-live checks* shows only *Messages you approved* not yet passing.
 
 ## Phase 2b: research account (recommended)
 
@@ -97,19 +65,13 @@ A second Instagram account does all the searching and profile reading, in its ow
 Instagram can still link accounts used from the same computer or Wi-Fi. This lowers the risk to your brand account; it does not hide the automation.
 
 - [ ] **Create the account.** Use a normal-looking personal account: a real name, a photo, a few follows. Log in on your phone once and use it by hand for a few days before the bot does.
-- [ ] **Configure.** In `config/settings.yaml`:
-  ```yaml
-  research:
-    enabled: true
-    account:
-      id: research
-      username: THE_SECOND_ACCOUNT
-  ```
-- [ ] **Log in.** Run `insta-outreach browser login --account research` and log in to the **second** account yourself, including 2FA. It gets its own browser profile in `data/browser_profiles/research/`.
-- [ ] **Probe (read-only).** Run `insta-outreach browser probe --account research --target SOME_BUSINESS --query "cafe Thane"`.
-- [ ] **Preflight.** Run `insta-outreach preflight`. It should show `research_session PASS`. In Mission Control, the *Research account* appears under *Instagram connections* with its own page-view meter.
+- [ ] **Turn it on.** Settings → *Instagram accounts* → *Use a separate research account*: tick it, enter its username, *Save*, then *Restart now* in the blue bar.
+- [ ] **Log in and test.** The research account now has its own row: **Log in…** (log in to the **second** account yourself, including 2FA), then **Test login**. It gets its own browser profile in `data/browser_profiles/research/`.
+- [ ] **Go-live checks** show *Instagram login (research account)* ok. The Dashboard's *Account health* lists the *Research account* with its own page-view meter.
 
-**Pass condition:** discovery attempts in `insta-outreach actions --type DISCOVER` show channel `RESEARCH`, never `BROWSER`.
+Command line alternative: `research.enabled: true` and `research.account.username` in `config/settings.yaml`, then `insta-outreach browser login --account research` and `insta-outreach browser probe --account research`.
+
+**Pass condition:** in Activity (with *Technical details* ticked), searches and profile checks show `via RESEARCH`, never `via BROWSER`.
 
 ## Phase 3: Meta app and webhooks (optional, recommended)
 
@@ -138,88 +100,87 @@ You can come back to this phase after Phase 4.
   - Callback URL: `https://<your-public-host>/webhooks/instagram`
   - Verify token: the value of `IG_WEBHOOK_VERIFY_TOKEN`
   - Subscribe to **`messages`**, **`message_echoes`**, **`comments`**
-- [ ] **Enable the lane.** Set `api.enabled: true` in `config/settings.yaml`.
-- [ ] **Preflight.** `insta-outreach preflight` shows `api_credentials PASS` and `webhooks PASS`.
+- [ ] **Enable the lane.** Set `api.enabled: true` in `config/settings.yaml`, then Settings → *Program* → *Restart the program*.
+- [ ] **Go-live checks** show *Official Meta API* and *Official API webhooks* ok (command line: `insta-outreach preflight`).
 
-**Pass condition:** Meta's "Verify and save" succeeds. After you send a DM from the test account (Phase 4), `insta-outreach audit` shows it was received. Deliveries with a bad signature are rejected (HTTP 403).
+**Pass condition:** Meta's "Verify and save" succeeds. After you send a DM from the test account (Phase 4), Activity shows it was received. Deliveries with a bad signature are rejected (HTTP 403).
 
 ## Phase 4: sandbox test with your own test account (OBSERVE → DRAFT → APPROVAL)
 
 This whole phase is rehearsed automatically against the mock site by `pytest tests/test_live_sandbox.py -v`.
 
-Work between **10:00 and 20:00 IST**. Outside the send hours (and the browser hours, 09:30-21:30) the gate defers everything, and `tick` does nothing visible. `insta-outreach action <id>` would show `DEFER - outside send hours`.
+Work between **10:00 and 20:00 IST**. Outside the send hours (and the browser hours, 09:30-21:30) everything waits; the Dashboard's top box says what it is waiting for.
 
-- [ ] **Add the test lead.** Run `insta-outreach add-lead @YOUR_TEST_ACCOUNT --note "sandbox test"`.
-- [ ] **OBSERVE.** Run `insta-outreach mode OBSERVE`, then `insta-outreach tick -n 3`. Use `tick` so you can watch one step at a time.
-  - Check `insta-outreach explain @YOUR_TEST_ACCOUNT`. Expect status `QUALIFIED` and correct facts. Opportunities should include `NEW_WEBSITE` and `ONLINE_BOOKING`.
-  - Check `insta-outreach generated all`. Expect `(none)`.
-- [ ] **DRAFT.** Run `insta-outreach mode DRAFT`, then `insta-outreach tick -n 2`.
-  - `insta-outreach approvals` shows exactly **one** draft, addressed to your test account.
+- [ ] **Add the test account.** Businesses → **Add a business** → your test account's username, note "sandbox test".
+- [ ] **OBSERVE.** The mode switch (top right) is on *Observe*. Within a few minutes the test account is checked.
+  - Click it in Businesses: expect *good fit*, correct facts, and opportunities such as *new website* and *online booking*. *Why the bot did what it did* shows every step.
+  - Approvals is empty: Observe never writes messages.
+- [ ] **DRAFT.** Switch the mode to *Draft*.
+  - Approvals shows exactly **one** draft, addressed to your test account.
   - Nothing arrived in the test account's Instagram inbox.
-- [ ] **APPROVAL.** Run `insta-outreach mode APPROVAL`.
-  - Approve the draft with `insta-outreach approve <act_…id>`. To change the wording, add `--message "…"`; the edit is validated again.
-  - Then run `insta-outreach tick -n 3` and watch the browser. It opens the test account's profile, opens the thread, types the exact approved text and sends it.
+- [ ] **APPROVAL.** Switch the mode to *Approval*, then press **Approve** on the draft. Edit the text first if you like; your edit is checked again.
+  - Watch the browser window: it opens the test account's profile, opens the chat, types the exact approved text and sends it.
   - The message arrives in the test account's **Requests** folder.
-  - `insta-outreach messages @YOUR_TEST_ACCOUNT` shows it `-> out BROWSER_AGENT SENT`.
-  - `insta-outreach action <id>` shows the screenshot path, taken after sending.
+  - Dashboard → *Latest messages* shows it as *sent*; the business's details show it in the chat, with a screenshot in its trail.
 - [ ] **One inbound reply.** From the test account, reply *"yes interested, tell me more"*.
-  - With webhooks, it arrives within a tick.
-  - Without them, the browser checks the inbox once per half hour. Run `insta-outreach tick` again after the next :00 or :30.
-  - Expect lead `HANDED_OFF`. `insta-outreach conversations --paused` lists the test account.
-  - `audit --kind reply` shows `reply classified INTERESTED … handed off to Rohit`.
-- [ ] **Human takeover.** Run `insta-outreach release @YOUR_TEST_ACCOUNT`. Then send a message to the test account **yourself** from the Instagram app as @lemmedeliver.
-  - With webhooks, it is noticed at the next tick; without them, at the next half-hourly inbox check.
-  - Either way, any automated send first reads the thread and refuses if it finds a message automation did not send.
-  - Expect owner `HUMAN` and automation paused (`audit --kind conversation`).
-  - Run `release` again afterwards if you want to continue.
+  - With webhooks, it arrives within a minute. Without them, the browser checks the inbox every half hour.
+  - Expect the Dashboard's *Today's progress* to say someone is waiting for your reply, and Chats to show the test account as *your turn*. The business is marked *Interested*.
+- [ ] **Human takeover.** In Chats, press *Hand back to the bot*. Then send a message to the test account **yourself** from the Instagram app as @lemmedeliver.
+  - It is noticed at the next inbox check (or at once with webhooks); any automated send first reads the chat and refuses if it finds a message the bot did not send.
+  - Expect the chat to show *you handle this chat* again. Activity says *You messaged @… yourself, so the bot leaves that chat to you*.
 - [ ] **Opt-out.** Reply *"please stop"* from the test account.
-  - Expect lead `CLOSED`. `insta-outreach suppressions` shows the handle (and IGSID if known).
-  - To keep testing: `insta-outreach unsuppress YOUR_TEST_ACCOUNT`. If an IGSID row is listed too, also run `insta-outreach unsuppress <id> --kind IGSID`. Both are recorded in the audit trail.
+  - Expect the business *closed*, and Settings → *Never contact* to list the handle (and its IGSID if known).
+  - To keep testing, press *Remove* on those rows. Both removals are recorded in the history.
 - [ ] **Checkpoint behaviour.** Do **not** try to trigger a real checkpoint. It is proven in simulation and against the mock (VERIFY.md §4).
-  - If Instagram shows one on its own, you will see a CRITICAL incident with a screenshot.
-  - Complete the check yourself in the Instagram app, then run `insta-outreach lane resume browser --note "…"`.
+  - If Instagram shows one on its own, the browser stops, a red strip says *Instagram needs you*, and Problems shows the screenshot.
+  - Complete the check yourself in the Instagram app, then press **Resume**.
+
+Command line alternative for this phase: `add-lead`, `mode`, `tick`, `approvals` / `approve`, `messages`, `release`, `suppressions` / `unsuppress`, `lane resume browser`.
 
 **Pass condition, all of the following:**
 - exactly the approved message arrived, once;
 - the reply was detected and handed to you;
 - your own message paused automation;
 - the opt-out was suppressed;
-- no incident is open;
-- `insta-outreach audit` tells the whole story.
+- no problem is open;
+- Activity tells the whole story.
 
 ## Phase 5: the real account (OBSERVE → DRAFT → APPROVAL)
 
-Remove the sandbox from `config/settings.yaml`:
-- delete `rollout.allowed_targets`, `campaigns: []` and the `scoring`/`limits` overrides;
-- or restore the campaign block from `config/settings.example.yaml`;
-- keep limits low at first, e.g. `outreach_per_day: 5`.
+Lift the sandbox in Mission Control:
+- Settings → *Test mode*: clear the list, *Save* (it asks you to confirm);
+- Campaigns: switch your campaign(s) back on, and check the kinds of business and places;
+- Settings → *Your messages*: *Fewest followers worth a message* back to 100;
+- Settings → *Daily limits*: keep them low at first, e.g. *First messages per day* 5.
 
-- [ ] **5a. OBSERVE, 1-3 days.** Run `insta-outreach mode OBSERVE`, then `insta-outreach run` (orchestrator + Mission Control).
-  - Daily: `insta-outreach leads`, `insta-outreach incidents`.
-  - Spot-check 10 leads with `explain`: are the facts true? Are the disqualifications right?
-  - **Pass:** no factual errors in 10 spot checks, no incidents, browser activity within hours (`audit`).
-- [ ] **5b. DRAFT, 1-2 days.** Run `insta-outreach mode DRAFT`.
-  - Read at least 20 drafts in `insta-outreach generated outreach`.
-  - **Pass:** every claim in every draft is true and the tone is right. Reject with `--redraft` if not; the reasons go into the audit trail.
-- [ ] **5c. APPROVAL, about a week.** Run `insta-outreach mode APPROVAL`. Approve drafts one by one: Mission Control (Approvals tab) or `approvals` / `approve` / `reject`.
+- [ ] **5a. OBSERVE, 1-3 days.** Mode *Observe*. Press **Find businesses now** once if you do not want to wait for the first search.
+  - Daily: Businesses and Problems.
+  - Spot-check 10 businesses (click them): are the facts true? Are the *not a fit* decisions right?
+  - **Pass:** no factual errors in 10 spot checks, no problems, browser activity only within its hours (Activity).
+- [ ] **5b. DRAFT, 1-2 days.** Mode *Draft*.
+  - Read at least 20 drafts in Approvals.
+  - **Pass:** every claim in every draft is true and the tone is right. Use *Reject & rewrite* if not; your reasons go into the history.
+- [ ] **5c. APPROVAL, about a week.** Mode *Approval*. Approve drafts one by one in Approvals.
+  - Mark how conversations go in each business's details (*Sales stage*: interested, meeting booked, proposal sent, client). Analytics then shows interested and clients per 100 messaged.
   - **Pass:**
-    - at least 3 approved sends succeeded (this is `preflight`'s `approved_sends`);
+    - at least 3 approved sends succeeded (*Go-live checks* → *Messages you approved*);
     - replies were handled correctly;
     - no conversation you handled yourself was touched;
-    - no open incident, no halted lane.
+    - no open problem, no stopped account.
 
-## Phase 6: AUTONOMOUS (only when you decide, and only if preflight passes)
+## Phase 6: AUTONOMOUS (only when you decide, and only if every go-live check passes)
 
-- [ ] **Check preflight.** `insta-outreach preflight` lists no FAIL and ends with `all required checks pass`.
-- [ ] **Switch.** Run `insta-outreach mode AUTONOMOUS`. It asks for confirmation, and the attempt is audited either way.
-- [ ] **Watch the first day.** Keep caps low, e.g. `insta-outreach limits --set outreach_per_day=5 outreach_per_hour=2`. Watch `audit --kind message.sent` and `incidents`. Raise caps gradually, if at all.
+- [ ] **Check.** Settings → *Go-live checks* shows no *not yet*.
+- [ ] **Switch.** Press *Autonomous* in the mode switch. It asks for confirmation, and the attempt is recorded either way.
+- [ ] **Watch the first day.** Keep limits low (Settings → *Daily limits*, e.g. 5 a day, 2 an hour). Watch Activity and Problems. Raise limits gradually, if at all.
 
 ## Stop and roll back, at any time
 
-| Situation | Command |
-|---|---|
-| Stop everything now | `insta-outreach pause on` |
-| Stop sending, keep preparing | `insta-outreach mode APPROVAL` (auto-approved items go back to the approval queue) |
-| Stop the browser only | `insta-outreach lane halt browser --note "…"` |
-| Never contact someone | `insta-outreach suppress @handle` (or `--kind DOMAIN/PHONE/EMAIL`) |
-| Take a conversation over | `insta-outreach claim @handle` |
+| Situation | In Mission Control | Command line |
+|---|---|---|
+| Stop everything now | **Pause all** (top right) | `insta-outreach pause on` |
+| Stop sending, keep preparing | Mode **Approval** (auto-approved items go back to the approval queue) | `insta-outreach mode APPROVAL` |
+| Stop the browser only | Dashboard → *Account health* → Browser → **Stop** | `insta-outreach lane halt browser --note "…"` |
+| Never contact someone | The business's details → **Never contact**, or Settings → *Never contact* | `insta-outreach suppress @handle` (or `--kind DOMAIN/PHONE/EMAIL`) |
+| Take a conversation over | Chats → **Take over** | `insta-outreach claim @handle` |
+| Back to the simulation | Settings → *Where it runs* → **Back to the simulation** | `environment: local` in `config/settings.yaml` |

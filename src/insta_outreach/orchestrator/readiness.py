@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from pathlib import Path
 
 from sqlalchemy import func, select
 
@@ -95,12 +94,11 @@ def live_readiness(services: Services, lanes: LaneService) -> list[Check]:
     )
     max_age = timedelta(days=rollout.browser_session_max_age_days)
     if browser_on:
-        checks.append(_session_check("browser_session", services, Channel.BROWSER, settings.account.id, now, max_age))
+        checks.append(_session_check("browser_session", services, Channel.BROWSER, now, max_age))
     else:
         checks.append(Check("browser_session", True, "browser lane disabled (first DMs need it)", False))
     if Channel.RESEARCH in adapters:  # finding leads stops without it; sending does not need it
-        account_id = settings.research.account.id
-        research = _session_check("research_session", services, Channel.RESEARCH, account_id, now, max_age)
+        research = _session_check("research_session", services, Channel.RESEARCH, now, max_age)
         checks.append(Check(research.name, research.ok, research.detail, False))
     if settings.api.enabled:
         checks.append(
@@ -195,12 +193,10 @@ def blocking(checks: list[Check]) -> list[Check]:
     return [c for c in checks if c.required and not c.ok]
 
 
-def _session_check(
-    name: str, services: Services, channel: Channel, account_id: str, now: datetime, max_age: timedelta
-) -> Check:
+def _session_check(name: str, services: Services, channel: Channel, now: datetime, max_age: timedelta) -> Check:
     """A logged-in browser profile, verified recently, for one Instagram account."""
-    profile = Path(services.settings.browser.profiles_dir) / account_id
-    has_profile = profile.is_dir() and any(profile.iterdir())
+    profile = services.settings.browser_profile(channel)
+    has_profile = not services.settings.first_login_pending(channel)  # readiness runs in the live environment
     verified_at = browser_verified_at(services, channel)
     fresh = verified_at is not None and now - verified_at <= max_age
     detail = (f"session verified {verified_at.isoformat()}" if verified_at else "never verified") + (

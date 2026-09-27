@@ -35,13 +35,22 @@ def test_page_is_static_and_locked_down(make_app) -> None:
     csp = page.headers["content-security-policy"]
     assert "script-src 'self'" in csp and "frame-ancestors 'none'" in csp and "unsafe-inline" not in csp
     assert "<script>" not in page.text and "style=" not in page.text  # nothing inline, so the CSP holds
-    script = client.get("/static/app.js")
-    assert script.status_code == 200 and script.headers["content-type"].startswith("text/javascript")
+    for name in ("app.js", "pages.js"):
+        script = client.get(f"/static/{name}")
+        assert script.status_code == 200 and script.headers["content-type"].startswith("text/javascript")
+        assert "innerHTML" not in script.text and "eval(" not in script.text  # text is inserted as text
     assert client.get("/static/app.css").headers["content-type"].startswith("text/css")
     for path in ("/static/index.html", "/static/..%2Fserver.py", "/static/../server.py", "/static/nope.js"):
         assert client.get(path).status_code == 404, path
     # The page holds no data; everything behind it needs the token.
-    for path in ("/api/overview", "/api/feed", "/api/leads/x/explain"):
+    for path in (
+        "/api/overview",
+        "/api/feed",
+        "/api/leads/x/explain",
+        "/api/dashboard",
+        "/api/setup",
+        "/api/analytics",
+    ):
         assert client.get(path).status_code == 401, path
 
 

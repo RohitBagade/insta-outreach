@@ -16,7 +16,6 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from insta_outreach.config import Settings
@@ -110,7 +109,6 @@ class AccountSessions:
             with self.s.db.session() as session:
                 lane = self._lanes.snapshot(session, settings.account.id, channel)
             verified = browser_verified_at(self.s, channel)
-            profile = Path(settings.browser.profiles_dir) / account.id
             job = self._jobs.get(which)
             rows.append(
                 {
@@ -123,7 +121,7 @@ class AccountSessions:
                     "lane_reason": lane.reason,
                     "verified_at_local": self._local(verified),
                     "verified_via": self.s.runtime.browser_session(channel).get("via"),
-                    "profile_saved": live and profile.is_dir() and any(profile.iterdir()),
+                    "profile_saved": live and not settings.first_login_pending(channel),
                     "job": job.as_dict(self._local) if job else None,
                 }
             )
@@ -175,9 +173,16 @@ class AccountSessions:
         except asyncio.CancelledError:
             job.state, job.message = "failed", "stopped before the login finished"
             raise
-        except Exception as exc:  # e.g. Chromium missing, profile locked: shown on the page
+        except Exception as exc:  # e.g. Chromium missing, no desktop, profile locked: shown on the page
             log.exception("login window failed")
-            job.state, job.message = "failed", f"The login window failed: {type(exc).__name__}: {exc}"[:300]
+            first = (str(exc).strip().splitlines() or [""])[0]
+            job.state, job.message = (
+                "failed",
+                (
+                    f"The login window could not open ({type(exc).__name__}: {first})"[:260]
+                    + ". It opens on the computer running the program, which needs its desktop."
+                ),
+            )
         finally:
             job.finished_at = self.s.clock.now()
             if stopped_here:

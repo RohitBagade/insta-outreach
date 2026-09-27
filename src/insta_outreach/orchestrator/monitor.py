@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -242,6 +242,7 @@ class MonitorService:
         self._lanes = lanes
         self._ledger = ledger
         self._account = services.settings.account.id
+        self.started = datetime.now(UTC).isoformat()  # tells the page when the program restarted
 
     # ------------------------------------------------------------------ helpers
     @property
@@ -268,6 +269,8 @@ class MonitorService:
                     "until_local": self.local(lane.until),
                     "reason": lane.reason,
                     "configured": lane.channel in self.s.executor.adapters,
+                    "needs_login": lane.channel in self.s.executor.adapters
+                    and settings.first_login_pending(lane.channel),
                 }
                 for lane in self._lanes.all_snapshots(session, self._account, self.s.executor.adapters)
             ]
@@ -411,6 +414,7 @@ class MonitorService:
                 "human_owned": human_owned or 0,
             },
             "cursor": cursor,
+            "started": self.started,
         }
 
     # -------------------------------------------------------------------- usage
@@ -564,22 +568,18 @@ class MonitorService:
 
     # ---------------------------------------------------------------- dashboard
     def dashboard(self) -> dict[str, Any]:
-        """The home page: totals with the last 7 days, today's messages, the best
+        """The home page: totals with the last 7 days, the latest messages, the best
         prospects, businesses by category, and chats waiting on Rohit."""
         now = self.s.clock.now()
         week_ago = now - timedelta(days=7)
-        day_start = local_day_start(now, self._tz)
         with self.s.db.session() as session:
             facts = _Facts.load(session)
-            today = session.execute(
+            latest = session.execute(
                 select(Action, Lead)
                 .outerjoin(Lead, Lead.id == Action.lead_id)
-                .where(
-                    Action.type.in_(_SEND_TYPES),
-                    (Action.created_at >= day_start) | (Action.completed_at >= day_start),
-                )
-                .order_by(func.coalesce(Action.completed_at, Action.created_at).desc())
-                .limit(40)
+                .where(Action.type.in_(_SEND_TYPES), Action.status != ActionStatus.PROPOSED)
+                .order_by(func.coalesce(Action.completed_at, Action.created_at).desc(), Action.id)
+                .limit(12)
             ).all()
             top_leads = session.scalars(
                 select(Lead)
@@ -615,7 +615,7 @@ class MonitorService:
                 "interested": kpi(list(facts.interested().values())),
                 "clients": kpi(list(facts.clients().values())),
             },
-            "today": [self._today_item(action, lead) for action, lead in today],
+            "latest": [self._message_item(action, lead) for action, lead in latest],
             "top": [
                 {
                     "handle": lead.username,
@@ -636,7 +636,7 @@ class MonitorService:
             "awaiting_you": awaiting,
         }
 
-    def _today_item(self, action: Action, lead: Lead | None) -> dict[str, Any]:
+    def _message_item(self, action: Action, lead: Lead | None) -> dict[str, Any]:
         kind = {
             ActionType.SEND_OUTREACH: "first message",
             ActionType.SEND_FOLLOW_UP: "follow-up",

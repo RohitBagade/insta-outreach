@@ -28,7 +28,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, Field, PrivateAttr, SecretStr, field_validator
 
-from insta_outreach.domain.enums import Environment, IncidentSeverity, OperatingMode
+from insta_outreach.domain.enums import Channel, Environment, IncidentSeverity, OperatingMode
 
 Effort = Literal["low", "medium", "high", "xhigh", "max"]
 
@@ -440,6 +440,22 @@ class Settings(BaseModel):
     @property
     def config_path(self) -> Path | None:
         return self._config_path
+
+    def browser_account(self, channel: Channel) -> AccountSettings:
+        """Which of our Instagram accounts a browser lane uses."""
+        return self.research.account if channel is Channel.RESEARCH else self.account
+
+    def browser_profile(self, channel: Channel) -> Path:
+        return Path(self.browser.profiles_dir) / self.browser_account(channel).id
+
+    def first_login_pending(self, channel: Channel) -> bool:
+        """LIVE: nobody has logged in to this browser account on this computer yet
+        (no saved browser profile). The bot leaves such an account alone: it would
+        only find Instagram's login page. Log in from Mission Control first."""
+        if self.environment is not Environment.LIVE or not channel.is_browser:
+            return False
+        profile = self.browser_profile(channel)
+        return not (profile.is_dir() and any(profile.iterdir()))
 
     @property
     def resolved_database_url(self) -> str:

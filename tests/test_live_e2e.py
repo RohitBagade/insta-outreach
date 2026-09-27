@@ -9,7 +9,7 @@ import pytest
 from insta_outreach.config import CampaignSettings, Settings, StrategySpec
 from insta_outreach.devtools.mock_instagram import STATE
 from insta_outreach.domain.enums import Environment, OperatingMode
-from tests.conftest import run_ticks
+from tests.conftest import logged_in, run_ticks
 
 pytestmark = pytest.mark.browser
 
@@ -33,7 +33,7 @@ def live_settings(tmp_path: Path, base_url: str) -> Settings:
             strategies=[StrategySpec(name="keyword_search", params={"max_queries_per_run": 1, "max_results": 5})],
         )
     ]
-    return settings
+    return logged_in(settings)
 
 
 async def test_orchestrator_drives_real_browser_agent(make_app, clock, tmp_path, mock_site) -> None:

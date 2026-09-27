@@ -300,12 +300,21 @@ class ControlService:
         self.s.runtime.set_paused(paused, by)
 
     # -- approvals ------------------------------------------------------------------
-    def list_actions(self, statuses: list[ActionStatus] | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    def list_actions(
+        self, statuses: list[ActionStatus] | None = None, limit: int = 50, with_lead: bool = False
+    ) -> list[dict[str, Any]]:
         with self.s.db.session() as session:
             query = select(Action).order_by(Action.created_at.desc()).limit(limit)
             if statuses:
                 query = query.where(Action.status.in_(statuses))
-            return [action_dict(a) for a in session.scalars(query)]
+            actions = list(session.scalars(query))
+            if not with_lead:
+                return [action_dict(a) for a in actions]
+            ids = [a.lead_id for a in actions if a.lead_id is not None]
+            leads = {lead.id: lead for lead in session.scalars(select(Lead).where(Lead.id.in_(ids)))}
+            return [
+                action_dict(a) | {"lead": lead_dict(leads[a.lead_id]) if a.lead_id in leads else None} for a in actions
+            ]
 
     def action_detail(self, action_id: str) -> dict[str, Any]:
         with self.s.db.session() as session:

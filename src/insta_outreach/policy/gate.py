@@ -25,6 +25,7 @@ from insta_outreach.domain.enums import (
     Channel,
     ConversationOwner,
     GateOutcome,
+    LaneState,
     LeadStatus,
     MessageDirection,
     OperatingMode,
@@ -216,6 +217,9 @@ def evaluate(f: GateFacts) -> GateDecision:
     return GateDecision(GateOutcome.ALLOW, ["all checks passed"])
 
 
+NOT_LOGGED_IN = "not logged in on this computer yet: log in from Mission Control (Settings > Instagram accounts)"
+
+
 def sandbox_targets(settings: Settings) -> set[str]:
     """Handles outbound messages are restricted to (empty: no restriction)."""
     return {t.strip().lstrip("@").lower() for t in settings.rollout.allowed_targets if t.strip()}
@@ -237,6 +241,12 @@ class EligibilityGate:
         self._ledger = ledger
         self._lanes = lanes
         self._rng = rng or random.Random()
+
+    def _lane(self, session: Session, account: str, channel: Channel) -> LaneSnapshot:
+        lane = self._lanes.snapshot(session, account, channel)
+        if not lane.halted and self._settings.first_login_pending(channel):
+            return LaneSnapshot(lane.account_id, channel, LaneState.HALTED, None, NOT_LOGGED_IN)
+        return lane
 
     def min_score_for(self, campaign_id: str | None) -> int:
         for campaign in self._settings.campaigns:
@@ -280,7 +290,7 @@ class EligibilityGate:
             min_score=self.min_score_for(action.campaign_id),
             require_business=self._settings.scoring.require_business_signals,
             followup_number=action.followup_number,
-            lanes=[self._lanes.snapshot(session, account, ch) for ch in channels],
+            lanes=[self._lane(session, account, ch) for ch in channels],
             outreach_today=ledger.total(session, account, [u.SEND_OUTREACH], day_start)
             + in_flight.get(ActionType.SEND_OUTREACH, 0),
             outreach_last_hour=ledger.total(session, account, [u.SEND_OUTREACH], hour_ago)

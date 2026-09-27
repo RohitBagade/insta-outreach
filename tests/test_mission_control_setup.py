@@ -28,7 +28,7 @@ from insta_outreach.domain.enums import (
 from insta_outreach.execution.simulator import SimulatedApiAdapter, SimulatedBrowserAdapter, SimulatedWorld
 from insta_outreach.orchestrator.monitor import plain_event
 from insta_outreach.storage.models import Lead
-from tests.conftest import run_ticks
+from tests.conftest import logged_in, run_ticks
 
 AUTH = {"authorization": "Bearer s3cret"}
 SETTINGS_YAML = """\
@@ -284,6 +284,21 @@ async def test_test_login_is_read_only_and_stops_on_a_checkpoint(make_app, setti
     assert app.control.incidents()
 
 
+async def test_no_browser_work_on_a_real_account_before_its_first_login(make_app, settings, clock) -> None:
+    app = live_app(make_app, settings, clock)
+    await run_ticks(app, clock, 6)
+    assert app.world.browser_ops == 0  # it would only have found Instagram's login page
+    lane = next(lane for lane in app.monitor.overview()["lanes"] if lane["channel"] == "BROWSER")
+    assert lane["needs_login"] and lane["state"] == "ACTIVE"  # nothing went wrong: no incident, no alert
+    waiting = [a["status_reason"] for a in app.control.list_actions(limit=50) if a["type"] == "DISCOVER"]
+    assert waiting and all("not logged in on this computer" in reason for reason in waiting)
+    assert app.control.incidents() == []
+    logged_in(settings)
+    await run_ticks(app, clock, 6)
+    assert app.world.browser_ops > 0
+    assert not next(lane for lane in app.monitor.overview()["lanes"] if lane["channel"] == "BROWSER")["needs_login"]
+
+
 def test_simulation_has_nothing_to_log_in_to(make_app) -> None:
     client = client_for(make_app())
     response = client.post("/api/accounts/brand/login", headers=AUTH)
@@ -302,7 +317,7 @@ async def test_home_page_numbers_add_up(make_app, clock) -> None:
     assert k["found"]["total"] == f["found"] > 0 and k["messaged"]["total"] == f["messaged"] > 0
     assert k["good_fit"]["total"] == f["good_fit"] and k["replied"]["total"] == f["replied"]
     assert all(0 <= v["week"] <= v["total"] for v in k.values())
-    assert d["today"] and all(item["status"] in ActionStatus.__members__ for item in d["today"])
+    assert d["latest"] and all(item["status"] in ActionStatus.__members__ for item in d["latest"])
     assert sum(c["found"] for c in d["categories"]) == f["found"]
     assert [t["score"] for t in d["top"]] == sorted((t["score"] for t in d["top"]), reverse=True)
 

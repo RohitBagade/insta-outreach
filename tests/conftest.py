@@ -68,6 +68,16 @@ def make_app(settings: Settings, clock: FakeClock) -> Iterator[Callable[..., App
         app.db.dispose()
 
 
+def logged_in(settings: Settings, *accounts: str) -> Settings:
+    """What `Log in` leaves behind: a saved browser profile per account. The bot does
+    no browser work on the real account before that first login."""
+    for account in accounts or (settings.account.id,):
+        profile = Path(settings.browser.profiles_dir) / account
+        profile.mkdir(parents=True, exist_ok=True)
+        (profile / "Local State").write_text("{}", encoding="utf-8")
+    return settings
+
+
 async def run_ticks(app: App, clock: FakeClock, n: int, minutes: int = 10) -> None:
     for _ in range(n):
         await app.orchestrator.tick()
