@@ -35,6 +35,18 @@ class AccountSettings(BaseModel):
     username: str = "lemmedeliver"
 
 
+class ResearchSettings(BaseModel):
+    """Optional second Instagram account that does all searching and profile
+    reading in its own browser session and lane. The brand account (``account``)
+    then only sends messages and reads its own chats, and a checkpoint on either
+    account never stops the other. Instagram can still link accounts used from
+    the same computer or network: this lowers the brand account's exposure, it
+    does not hide the automation."""
+
+    enabled: bool = False
+    account: AccountSettings = Field(default_factory=lambda: AccountSettings(id="research", username=""))
+
+
 class ApiSettings(BaseModel):
     """Tier 1: official Meta Instagram Platform APIs.
 
@@ -401,6 +413,7 @@ class Settings(BaseModel):
     data_dir: Path = Path("data")
     database_url: str | None = None
     account: AccountSettings = Field(default_factory=AccountSettings)
+    research: ResearchSettings = Field(default_factory=ResearchSettings)
     api: ApiSettings = Field(default_factory=ApiSettings)
     browser: BrowserSettings = Field(default_factory=BrowserSettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)

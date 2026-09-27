@@ -74,7 +74,7 @@ _WARN = ("action.blocked", "action.cancelled", "action.demoted", "send.not_sent"
 _CRITICAL = ("lane.halted", "send.stopped")
 
 
-_CHANNEL_NAME = {"BROWSER": "browser", "API": "official API"}
+_CHANNEL_NAME = {"BROWSER": "browser", "API": "official API", "RESEARCH": "research account"}
 _STOP_REASON = {
     "CHECKPOINT_REQUIRED": "Instagram asked to confirm it's you",
     "LOGIN_REQUIRED": "Instagram logged the account out",
@@ -221,7 +221,7 @@ class MonitorService:
                     "reason": lane.reason,
                     "configured": lane.channel in self.s.executor.adapters,
                 }
-                for lane in self._lanes.all_snapshots(session, self._account)
+                for lane in self._lanes.all_snapshots(session, self._account, self.s.executor.adapters)
             ]
             leads = {k.value: v for k, v in session.execute(select(Lead.status, func.count()).group_by(Lead.status))}
             sends = {
@@ -386,6 +386,8 @@ class MonitorService:
                 "replies_last_hour": ledger.total(session, account, [u.SEND_REPLY], hour_ago),
                 "replies_per_hour": limits.replies_per_hour,
                 "browser_units_last_hour": ledger.total(session, account, [u.PAGE_VIEW], hour_ago, Channel.BROWSER),
+                "research_on": Channel.RESEARCH in self.s.executor.adapters,
+                "research_units_last_hour": ledger.total(session, account, [u.PAGE_VIEW], hour_ago, Channel.RESEARCH),
                 "browser_units_per_hour": limits.browser_units_per_hour,
                 "inspections_today": ledger.total(session, account, [u.INSPECTION], day_start),
                 "profile_inspections_per_day": limits.profile_inspections_per_day,

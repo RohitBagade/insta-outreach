@@ -8,6 +8,7 @@ halts it for review. Nothing here ever tries to get *past* a barrier.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -95,8 +96,12 @@ class LaneService:
             lane.reason = None
         return LaneSnapshot(account_id, channel, lane.state, lane.until, lane.reason)
 
-    def all_snapshots(self, session: Session, account_id: str) -> list[LaneSnapshot]:
-        return [self.snapshot(session, account_id, channel) for channel in Channel]
+    def all_snapshots(
+        self, session: Session, account_id: str, configured: Collection[Channel] | None = None
+    ) -> list[LaneSnapshot]:
+        """Every lane; with ``configured``, the optional RESEARCH lane only when it is set up."""
+        channels = [c for c in Channel if configured is None or c is not Channel.RESEARCH or c in configured]
+        return [self.snapshot(session, account_id, channel) for channel in channels]
 
     # -- result handling -----------------------------------------------------
     def record_result(

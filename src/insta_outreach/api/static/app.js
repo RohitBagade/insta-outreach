@@ -51,12 +51,17 @@ function laneWhy(reason) {
   if (STOP_REASON[code]) return STOP_REASON[code];
   return text.startsWith('rate limited') ? STOP_REASON.RATE_LIMITED : (text || 'stopped by hand');
 }
-const LANE_NAME = {API: 'Official API', BROWSER: 'Browser'};
+const LANE_NAME = {API: 'Official API', BROWSER: 'Browser', RESEARCH: 'Research account'};
 const laneName = (ch) => LANE_NAME[ch] || ch;
 const LANE_JOB = {
   API: "replies and comment replies, within Meta's rules",
   BROWSER: 'first messages, searches and profile checks',
+  RESEARCH: 'a second account that searches and reads profiles, so @lemmedeliver only sends',
 };
+// The research lane is optional: shown only when it is set up.
+const shownLanes = (o) => o.lanes.filter((l) => l.channel !== 'RESEARCH' || l.configured);
+const researchOn = (o) => o.lanes.some((l) => l.channel === 'RESEARCH' && l.configured);
+const laneJob = (o, ch) => (ch === 'BROWSER' && researchOn(o) ? 'first messages and your chats' : LANE_JOB[ch] || '');
 const LANE_STATE = {ACTIVE: ['good', 'working'], COOLDOWN: ['warning', 'resting'], HALTED: ['critical', 'stopped: needs you']};
 const LEAD_STATUS = {
   DISCOVERED: 'found, not checked yet', ANALYZED: 'checked: no clear need', QUALIFIED: 'good fit',
@@ -121,8 +126,15 @@ function renderNow(o) {
   if (o.paused) {
     tone = 'warning'; label = 'Paused'; text = 'Paused: nothing happens until you press Resume.';
   } else if (halted.length) {
-    tone = 'critical'; label = 'Needs you';
-    text = `${laneWhy(halted[0].reason)}. The ${laneName(halted[0].channel).toLowerCase()} is stopped until you fix it and press Resume.`;
+    const lane = halted.find((l) => l.channel !== 'RESEARCH') || halted[0];
+    label = 'Needs you';
+    if (lane.channel === 'RESEARCH') {
+      tone = 'warning';
+      text = `${laneWhy(lane.reason)} on the research account. Finding new businesses is paused; @${o.account} keeps sending. Fix it and press Resume.`;
+    } else {
+      tone = 'critical';
+      text = `${laneWhy(lane.reason)}. The ${laneName(lane.channel).toLowerCase()} is stopped until you fix it and press Resume.`;
+    }
   }
   $('nowMark').replaceChildren(status(tone, label));
   $('nowText').textContent = text;
@@ -148,10 +160,10 @@ function renderNow(o) {
 // ---------------------------------------------------------------- funnel
 const NODES = [
   {id: 'discover', label: 'Found', unit: 'businesses found', tab: ['leads', ''], value: (f) => f.found,
-    subs: (f) => [['still being checked', f.checking]]},
+    lanes: (ch) => ch === 'RESEARCH', subs: (f) => [['still being checked', f.checking]]},
   {id: 'fit', label: 'Good fit', unit: 'worth a message', tab: ['leads', 'QUALIFIED'], value: (f) => f.good_fit,
     subs: (f) => [['not a fit', f.not_fit], ['no clear need', f.no_need], ['duplicates', f.duplicates]]},
-  {id: 'send', label: 'Messaged', unit: 'businesses messaged', tab: ['leads', 'CONTACTED'], lanes: true, value: (f) => f.messaged,
+  {id: 'send', label: 'Messaged', unit: 'businesses messaged', tab: ['leads', 'CONTACTED'], lanes: (ch) => ch !== 'RESEARCH', value: (f) => f.messaged,
     subs: (f, o) => [['sent today', o.pipeline.send.sent_today], ['waiting for your approval', f.waiting_approval], ['queued', f.queued]]},
   {id: 'conversation', label: 'Replied', unit: 'businesses replied', tab: ['conversations'], value: (f) => f.replied,
     subs: (f, o) => [['said no / closed', o.pipeline.conversation.closed]]},
@@ -174,10 +186,12 @@ function renderFlow(o) {
     node.querySelector('.value').textContent = fmt(n.value(o.funnel));
     node.querySelector('.subs').replaceChildren(...n.subs(o.funnel, o).filter(([, v]) => v).map(([k, v]) => h('div', {class: 'sub'}, k + ' ', h('b', {class: 'num'}, fmt(v)))));
     if (n.lanes) {
-      node.querySelector('.lanechips').replaceChildren(...o.lanes.filter((l) => l.configured).map((l) => status(LANE_STATE[l.state][0], laneName(l.channel) + ' ' + LANE_STATE[l.state][1].split(':')[0])));
+      node.querySelector('.lanechips').replaceChildren(...shownLanes(o).filter((l) => l.configured && n.lanes(l.channel)).map((l) => status(LANE_STATE[l.state][0], laneName(l.channel) + ' ' + LANE_STATE[l.state][1].split(':')[0])));
     }
   }
-  $('node-send').classList.toggle('alert', o.lanes.some((l) => l.configured && l.state === 'HALTED'));
+  const halted = (ch) => o.lanes.some((l) => l.configured && l.state === 'HALTED' && ch(l.channel));
+  $('node-send').classList.toggle('alert', halted((ch) => ch !== 'RESEARCH'));  // sending is stopped
+  $('node-discover').classList.toggle('alert', halted((ch) => ch === 'RESEARCH'));  // finding is paused
   $('node-you').classList.toggle('attn', o.funnel.with_you > 0);
 }
 function pulse(nodeId) {
@@ -234,19 +248,20 @@ function meter(label, used, cap) {
 }
 function renderUsage(o) {
   const u = o.usage;
-  $('meters').replaceChildren(
+  $('meters').replaceChildren(...[
     meter('First messages today', u.outreach_today, u.outreach_per_day),
     meter('First messages this hour', u.outreach_last_hour, u.outreach_per_hour),
     meter('Follow-ups today', u.followups_today, u.followups_per_day),
     meter('Browser page views this hour', u.browser_units_last_hour, u.browser_units_per_hour),
-    meter('Profiles checked today', u.inspections_today, u.profile_inspections_per_day));
+    u.research_on ? meter('Research account page views this hour', u.research_units_last_hour, u.browser_units_per_hour) : null,
+    meter('Profiles checked today', u.inspections_today, u.profile_inspections_per_day)].filter(Boolean));
 }
 function renderLanes(o) {
-  $('lanes').replaceChildren(...o.lanes.map((l) => {
+  $('lanes').replaceChildren(...shownLanes(o).map((l) => {
     const [tone, word] = l.configured ? LANE_STATE[l.state] : ['neutral', 'off'];
     return h('div', {class: 'lane'},
       h('div', {class: 'row'}, h('strong', {}, laneName(l.channel)), status(tone, word)),
-      h('div', {class: 'small muted'}, LANE_JOB[l.channel] || ''),
+      h('div', {class: 'small muted'}, laneJob(o, l.channel)),
       l.configured && l.state !== 'ACTIVE' && l.reason ? h('div', {class: 'small'}, laneWhy(l.reason)) : null,
       l.until_local ? h('div', {class: 'small muted'}, 'until ' + when(l.until_local)) : null,
       l.configured ? h('div', {class: 'row'},

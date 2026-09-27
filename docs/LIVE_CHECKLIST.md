@@ -87,6 +87,30 @@ limits:
 
 **Pass condition:** the probe output matches reality. `preflight` shows only `approved_sends` failing.
 
+## Phase 2b: research account (recommended)
+
+A second Instagram account does all the searching and profile reading, in its own browser session and lane. @lemmedeliver then only sends messages and reads its own chats.
+- If Instagram challenges the research account, finding new businesses pauses but sending continues.
+- If it challenges @lemmedeliver, sending stops but research continues.
+- Research never falls back to @lemmedeliver.
+
+Instagram can still link accounts used from the same computer or Wi-Fi. This lowers the risk to your brand account; it does not hide the automation.
+
+- [ ] **Create the account.** Use a normal-looking personal account: a real name, a photo, a few follows. Log in on your phone once and use it by hand for a few days before the bot does.
+- [ ] **Configure.** In `config/settings.yaml`:
+  ```yaml
+  research:
+    enabled: true
+    account:
+      id: research
+      username: THE_SECOND_ACCOUNT
+  ```
+- [ ] **Log in.** Run `insta-outreach browser login --account research` and log in to the **second** account yourself, including 2FA. It gets its own browser profile in `data/browser_profiles/research/`.
+- [ ] **Probe (read-only).** Run `insta-outreach browser probe --account research --target SOME_BUSINESS --query "cafe Thane"`.
+- [ ] **Preflight.** Run `insta-outreach preflight`. It should show `research_session PASS`. In Mission Control, the *Research account* appears under *Instagram connections* with its own page-view meter.
+
+**Pass condition:** discovery attempts in `insta-outreach actions --type DISCOVER` show channel `RESEARCH`, never `BROWSER`.
+
 ## Phase 3: Meta app and webhooks (optional, recommended)
 
 The browser lane works without this. The API adds, within Meta's rules:

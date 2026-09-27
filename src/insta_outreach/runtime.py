@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from insta_outreach.config import LimitsSettings, Settings
-from insta_outreach.domain.enums import OperatingMode
+from insta_outreach.domain.enums import Channel, OperatingMode
 from insta_outreach.policy.audit import audit
 from insta_outreach.storage.db import Database
 from insta_outreach.storage.models import RuntimeSetting
@@ -23,6 +23,11 @@ MODE_KEY = "operating_mode"
 PAUSED_KEY = "global_pause"
 LIMITS_KEY = "limits_overrides"
 BROWSER_SESSION_KEY = "browser_session"
+
+
+def _session_key(channel: Channel) -> str:
+    """The brand account keeps the original key; the research account gets its own."""
+    return BROWSER_SESSION_KEY if channel is Channel.BROWSER else f"{BROWSER_SESSION_KEY}:{channel.value.lower()}"
 
 
 class RuntimeControl:
@@ -134,21 +139,22 @@ class RuntimeControl:
             )
 
     # -- browser session proof (for the live readiness check) --------------------
-    def browser_session(self) -> dict[str, Any]:
+    def browser_session(self, channel: Channel = Channel.BROWSER) -> dict[str, Any]:
         with self._db.session() as session:
-            return dict(self._get(session, BROWSER_SESSION_KEY) or {})
+            return dict(self._get(session, _session_key(channel)) or {})
 
-    def record_browser_session(self, via: str, by: str, detail: str = "") -> None:
+    def record_browser_session(self, via: str, by: str, detail: str = "", channel: Channel = Channel.BROWSER) -> None:
         now = self._clock.now()
+        who = "research account" if channel is Channel.RESEARCH else "browser"
         with self._db.session() as session:
-            self._put(session, BROWSER_SESSION_KEY, {"verified_at": now.isoformat(), "via": via}, by)
+            self._put(session, _session_key(channel), {"verified_at": now.isoformat(), "via": via}, by)
             audit(
                 session,
                 now,
                 actor=by,
                 kind="browser.session_verified",
-                subject="lane:BROWSER",
-                summary=f"browser session verified via {via}" + (f": {detail}" if detail else ""),
+                subject=f"lane:{channel.value}",
+                summary=f"{who} session verified via {via}" + (f": {detail}" if detail else ""),
                 via=via,
             )
 

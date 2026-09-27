@@ -63,7 +63,7 @@ This starts the orchestrator plus **Mission Control** at <http://127.0.0.1:8765>
 | **Funnel** | Found → Good fit → Messaged → Replied → With you, with live counts. A box pulses when something happens in it. | click a box to see the list |
 | **What's happening** | a plain-English diary, newest first: messages sent, replies (quoted), handoffs, new businesses found, Instagram problems. Scrolling down to read stops new events pushing the list; a "↑ new" button brings you back. | filter: Messages, Replies, Problems; tick **Technical details** to also see every search, profile check and inbox read; click any @name |
 | **Today's limits** | usage vs caps, computed exactly as the gate enforces them | – |
-| **Instagram connections** | Official API and Browser: working / resting / stopped, and why | Stop, Resume (after *you* fixed the problem on Instagram) |
+| **Instagram connections** | Official API, Browser (@lemmedeliver) and, if set up, the Research account: working / resting / stopped, and why | Stop, Resume (after *you* fixed the problem on Instagram) |
 | **Go-live checks** | the `preflight` checks that gate live AUTONOMOUS | – |
 | **Waiting for approval** | every message waiting for you, with the facts it is based on | edit, approve, reject & rewrite, reject |
 | **Chats** | who handles each chat: the bot or you | take over, hand back to the bot |
