@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>Voice agent</title>
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <div class="title">
+        <h1 id="name">Voice agent</h1>
+        <p class="sub"><span id="model">connecting…</span></p>
+      </div>
+      <p class="pill" id="pill"><span class="dot"></span><span id="pill-text">Offline</span></p>
+    </header>
+
+    <div class="banner" id="banner" role="alert" hidden>
+      <strong id="banner-title"></strong>
+      <span id="banner-text"></span>
+    </div>
+
+    <main class="layout">
+      <section class="stage" aria-label="Agent">
+        <canvas class="orb" id="orb" width="600" height="600" aria-hidden="true"></canvas>
+        <p class="status" id="status" aria-live="polite">Press Start talking</p>
+        <p class="hint" id="hint">Just talk, then pause when you're done.</p>
+        <div class="controls">
+          <button type="button" class="primary" id="start">Start talking</button>
+          <button type="button" id="interrupt" hidden disabled>Interrupt</button>
+          <button type="button" id="mute" aria-pressed="false" hidden>Mute mic</button>
+          <button type="button" id="reset" disabled>New conversation</button>
+        </div>
+        <details class="settings">
+          <summary>Voice and settings</summary>
+          <label class="field">
+            <span>Voice</span>
+            <select id="voice">
+              <option value="">Automatic (best for the language)</option>
+            </select>
+          </label>
+          <label class="check">
+            <input type="checkbox" id="barge">
+            <span>Allow interrupting by voice (use headphones)</span>
+          </label>
+          <p class="small" id="voice-note"></p>
+          <p class="small">Press <kbd>Space</kbd> to interrupt him while he talks.</p>
+        </details>
+      </section>
+
+      <section class="talk" aria-label="Conversation">
+        <h2>Conversation</h2>
+        <ol class="transcript" id="transcript"></ol>
+        <p class="empty" id="empty"><span>Press <strong>Start talking</strong> and say hello.</span></p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

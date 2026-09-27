@@ -157,6 +157,7 @@ The comment → private-reply path and the API-only reply path are fully within 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): components, the pipeline, routing, lanes, conversation ownership, idempotency, data model, extension points.
 - [docs/RESEARCH.md](docs/RESEARCH.md): what the Meta APIs can and cannot do (Sept 2026, with sources), and why Playwright plus a constrained Claude resolver was chosen over browser-use or Stagehand.
 - [docs/OPERATIONS.md](docs/OPERATIONS.md): runbook covering setup, modes, approvals, incidents and resuming lanes, human takeover, retention and troubleshooting.
+- [voice_agent/README.md](voice_agent/README.md): a separate, hands-free voice assistant on Groq that you talk to out loud (`python -m voice_agent`).
 
 ## Development
 
