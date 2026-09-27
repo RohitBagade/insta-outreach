@@ -15,7 +15,10 @@ from insta_outreach.domain.enums import (
     Environment,
     IncidentStatus,
     LeadStatus,
+    MessageDirection,
     OperatingMode,
+    ReplyIntent,
+    SalesStage,
     SuppressionKind,
 )
 from insta_outreach.domain.models import text_sha256
@@ -33,6 +36,7 @@ from insta_outreach.storage.models import (
     Incident,
     Lead,
     LeadSource,
+    LeadStage,
     Message,
     Suppression,
 )
@@ -81,6 +85,41 @@ def action_dict(a: Action) -> dict[str, Any]:
     }
 
 
+INTERESTED_INTENTS = (ReplyIntent.INTERESTED, ReplyIntent.QUESTION)
+
+
+def interested_lead_ids(session: Session, lead_ids: list[int] | None = None) -> set[int]:
+    """Leads whose reply was classified as interested or a question."""
+    query = (
+        select(Conversation.lead_id)
+        .join(Message, Message.conversation_id == Conversation.id)
+        .where(
+            Message.direction == MessageDirection.INBOUND,
+            Message.intent.in_(INTERESTED_INTENTS),
+            Conversation.lead_id.is_not(None),
+        )
+    )
+    if lead_ids is not None:
+        query = query.where(Conversation.lead_id.in_(lead_ids))
+    return {lead_id for lead_id in session.scalars(query.distinct()) if lead_id is not None}
+
+
+def stage_info(session: Session, lead_ids: list[int]) -> dict[int, dict[str, Any]]:
+    """Each lead's sales stage: the one Rohit set, else INTERESTED from the reply."""
+    stages = {row.lead_id: row for row in session.scalars(select(LeadStage).where(LeadStage.lead_id.in_(lead_ids)))}
+    interested = interested_lead_ids(session, lead_ids)
+    info: dict[int, dict[str, Any]] = {}
+    for lead_id in lead_ids:
+        row = stages.get(lead_id)
+        if row is not None:
+            info[lead_id] = {"stage": row.stage.value, "stage_note": row.note, "stage_auto": False}
+        elif lead_id in interested:
+            info[lead_id] = {"stage": SalesStage.INTERESTED.value, "stage_note": None, "stage_auto": True}
+        else:
+            info[lead_id] = {"stage": None, "stage_note": None, "stage_auto": False}
+    return info
+
+
 def lead_dict(lead: Lead, detail: bool = False) -> dict[str, Any]:
     data: dict[str, Any] = {
         "id": lead.id,
@@ -100,6 +139,7 @@ def lead_dict(lead: Lead, detail: bool = False) -> dict[str, Any]:
         "replied_at": _iso(lead.replied_at),
         "followups_sent": lead.followups_sent,
         "followups_blocked_reason": lead.followups_blocked_reason,
+        "found_at": _iso(lead.created_at),
     }
     if detail:
         data |= {
@@ -404,7 +444,36 @@ class ControlService:
             query = select(Conversation).order_by(Conversation.updated_at.desc()).limit(limit)
             if paused_only:
                 query = query.where(Conversation.automation_paused.is_(True))
-            return [conversation_dict(c) for c in session.scalars(query)]
+            convs = list(session.scalars(query))
+            last_ids = session.scalars(
+                select(func.max(Message.id))
+                .where(Message.conversation_id.in_([c.id for c in convs]))
+                .group_by(Message.conversation_id)
+            ).all()
+            last = {m.conversation_id: m for m in session.scalars(select(Message).where(Message.id.in_(last_ids)))}
+            lead_ids = [c.lead_id for c in convs if c.lead_id is not None]
+            leads = {lead.id: lead for lead in session.scalars(select(Lead).where(Lead.id.in_(lead_ids)))}
+            stages = stage_info(session, lead_ids)
+            rows = []
+            for c in convs:
+                message = last.get(c.id)
+                lead = leads.get(c.lead_id) if c.lead_id is not None else None
+                inbound_last = message is not None and message.direction is MessageDirection.INBOUND
+                rows.append(
+                    conversation_dict(c)
+                    | {
+                        "last_text": message.text if message else None,
+                        "last_direction": message.direction.value if message else None,
+                        "last_at": _iso((message.sent_at or message.created_at) if message else None),
+                        "last_intent": message.intent.value if message and message.intent else None,
+                        "waiting_on_you": bool(c.automation_paused and inbound_last),
+                        "full_name": lead.full_name if lead else None,
+                        "lead_status": lead.status.value if lead else None,
+                        "score": lead.score if lead else None,
+                    }
+                    | (stages.get(c.lead_id, {}) if c.lead_id is not None else {})
+                )
+            return rows
 
     def _conversation(self, session: Session, ref: str | int) -> Conversation:
         conv = (
@@ -452,30 +521,77 @@ class ControlService:
             query = select(Lead).order_by(Lead.score.desc().nulls_last(), Lead.id).limit(limit)
             if statuses:
                 query = query.where(Lead.status.in_(statuses))
-            return [lead_dict(lead) for lead in session.scalars(query)]
+            leads = list(session.scalars(query))
+            ids = [lead.id for lead in leads]
+            stages = stage_info(session, ids)
+            source: dict[int, str] = {}
+            for lead_id, strategy in session.execute(
+                select(LeadSource.lead_id, LeadSource.strategy)
+                .where(LeadSource.lead_id.in_(ids))
+                .order_by(LeadSource.discovered_at, LeadSource.id)
+            ):
+                source.setdefault(lead_id, strategy)
+            return [lead_dict(lead) | stages[lead.id] | {"source": source.get(lead.id)} for lead in leads]
+
+    def _lead(self, session: Session, ref: str | int) -> Lead:
+        lead = (
+            session.get(Lead, int(ref))
+            if str(ref).isdigit()
+            else session.scalars(select(Lead).where(Lead.username == str(ref).lstrip("@").lower())).first()
+        )
+        if lead is None:
+            raise ControlError(f"no lead {ref}")
+        return lead
+
+    def set_stage(self, ref: str | int, stage: SalesStage | None, by: str, note: str = "") -> dict[str, Any]:
+        """Record how far the conversation got commercially (None clears it)."""
+        with self.s.db.session() as session:
+            lead = self._lead(session, ref)
+            row = session.get(LeadStage, lead.id)
+            previous = row.stage if row is not None else None
+            now = self.s.clock.now()
+            if stage is None:
+                if row is not None:
+                    session.delete(row)
+            elif row is None:
+                session.add(LeadStage(lead_id=lead.id, stage=stage, note=note or None, updated_at=now, updated_by=by))
+            else:
+                row.stage, row.note, row.updated_at, row.updated_by = stage, note or None, now, by
+            audit(
+                session,
+                now,
+                actor=by,
+                kind="lead.stage",
+                subject=f"@{lead.username}",
+                summary=f"@{lead.username} sales stage {previous.value if previous else 'none'}"
+                f" -> {stage.value if stage else 'none'} by {by}" + (f": {note}" if note else ""),
+                stage=stage,
+                previous=previous,
+                note=note,
+            )
+            session.flush()
+            return lead_dict(lead) | stage_info(session, [lead.id])[lead.id]
 
     def lead_detail(self, ref: str | int) -> dict[str, Any]:
         with self.s.db.session() as session:
-            lead = (
-                session.get(Lead, int(ref))
-                if str(ref).isdigit()
-                else session.scalars(select(Lead).where(Lead.username == str(ref).lstrip("@").lower())).first()
-            )
-            if lead is None:
-                raise ControlError(f"no lead {ref}")
+            lead = self._lead(session, ref)
             sources = session.scalars(select(LeadSource).where(LeadSource.lead_id == lead.id)).all()
-            return lead_dict(lead, detail=True) | {
-                "sources": [
-                    {
-                        "strategy": s.strategy,
-                        "query": s.query,
-                        "seed": s.seed,
-                        "post_url": s.post_url,
-                        "discovered_at": _iso(s.discovered_at),
-                    }
-                    for s in sources
-                ]
-            }
+            return (
+                lead_dict(lead, detail=True)
+                | stage_info(session, [lead.id])[lead.id]
+                | {
+                    "sources": [
+                        {
+                            "strategy": s.strategy,
+                            "query": s.query,
+                            "seed": s.seed,
+                            "post_url": s.post_url,
+                            "discovered_at": _iso(s.discovered_at),
+                        }
+                        for s in sources
+                    ]
+                }
+            )
 
     def add_lead(self, username: str, by: str, campaign_id: str | None = None, note: str = "") -> dict[str, Any]:
         """Add a handle by hand. It goes through the same pipeline as discovered

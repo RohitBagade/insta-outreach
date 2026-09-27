@@ -24,11 +24,13 @@ from insta_outreach.intelligence.analyzer import LeadAnalyzer
 from insta_outreach.intelligence.website import HttpWebsiteChecker, WebsiteChecker
 from insta_outreach.llm import AnthropicLLM, StructuredLLM
 from insta_outreach.notify import FanoutNotifier, LogNotifier, Notifier, TelegramNotifier, WebhookNotifier
+from insta_outreach.orchestrator.accounts import AccountSessions
 from insta_outreach.orchestrator.actions import ActionService
 from insta_outreach.orchestrator.control import ControlService
 from insta_outreach.orchestrator.monitor import MonitorService
 from insta_outreach.orchestrator.pipeline import IdentityResolver, Pipeline, Services
 from insta_outreach.orchestrator.service import EventSource, Orchestrator
+from insta_outreach.orchestrator.setup import SetupService
 from insta_outreach.orchestrator.worker import ExecutionWorker
 from insta_outreach.personalization.composer import MessageComposer
 from insta_outreach.personalization.validator import MessageValidator
@@ -63,14 +65,16 @@ class App:
     webhook_inbox: WebhookInbox
     notifier: Notifier
     llm: StructuredLLM
+    setup: SetupService
     world: SimulatedWorld | None = None
 
     async def close(self) -> None:
+        await self.setup.accounts.close()  # a login window still open
         await self.executor.close()
         self.db.dispose()
 
 
-def build_notifier(settings: Settings) -> FanoutNotifier:
+def alert_destinations(settings: Settings) -> list[Notifier]:
     """Log always; plus the webhook and/or Telegram when configured."""
     cfg = settings.notifications
     extra: list[Notifier] = []
@@ -82,7 +86,11 @@ def build_notifier(settings: Settings) -> FanoutNotifier:
                 cfg.telegram_bot_token.get_secret_value(), cfg.telegram_chat_id, cfg.min_severity, cfg.dashboard_url
             )
         )
-    return FanoutNotifier(LogNotifier(), *extra)
+    return [LogNotifier(), *extra]
+
+
+def build_notifier(settings: Settings) -> FanoutNotifier:
+    return FanoutNotifier(*alert_destinations(settings))
 
 
 def _live_adapters(
@@ -208,6 +216,8 @@ def build_app(
     worker = ExecutionWorker(services, pipeline, ledger, lanes)
     orchestrator = Orchestrator(services, pipeline, worker, event_source)
     control = ControlService(services, lanes, validator)
+    monitor = MonitorService(services, lanes, ledger)
+    setup = SetupService(services, notifier, AccountSessions(services, lanes, control, monitor.local))
     return App(
         settings=settings,
         db=db,
@@ -218,7 +228,7 @@ def build_app(
         worker=worker,
         orchestrator=orchestrator,
         control=control,
-        monitor=MonitorService(services, lanes, ledger),
+        monitor=monitor,
         lanes=lanes,
         incidents=incidents,
         ledger=ledger,
@@ -226,6 +236,7 @@ def build_app(
         webhook_inbox=webhook_inbox,
         notifier=notifier,
         llm=llm,
+        setup=setup,
         world=world,
     )
 

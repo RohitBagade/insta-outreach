@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import Any
 
 from insta_outreach.config import Settings
@@ -18,7 +19,9 @@ from insta_outreach.storage.db import Database
 from insta_outreach.util.clock import Clock
 
 
-async def interactive_login(settings: Settings, timeout_seconds: int = 900) -> tuple[bool, str]:
+async def interactive_login(
+    settings: Settings, timeout_seconds: int = 900, announce: Callable[[str], None] = print
+) -> tuple[bool, str]:
     """Open a visible browser on the persistent profile and wait for Rohit to
     log in (including any 2FA / checkpoint) himself. Nothing is typed for him."""
     ui = load_ui_map(settings.browser.ui_map_path)
@@ -26,10 +29,10 @@ async def interactive_login(settings: Settings, timeout_seconds: int = 900) -> t
     detector = PageStateDetector(ui)
     try:
         page = await session.goto(ui.url("login", settings.browser.base_url))
-        print(
+        announce(
             f"A browser window is open at {page.url}.\n"
             "Log in to @%s yourself (complete any security checks there). "
-            "This command finishes once the home feed loads." % settings.account.username
+            "This finishes once the home feed loads." % settings.account.username
         )
         waited = 0
         while waited < timeout_seconds:

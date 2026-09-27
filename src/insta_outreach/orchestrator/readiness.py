@@ -201,18 +201,21 @@ def _session_check(
     """A logged-in browser profile, verified recently, for one Instagram account."""
     profile = Path(services.settings.browser.profiles_dir) / account_id
     has_profile = profile.is_dir() and any(profile.iterdir())
-    verified_at = _browser_verified_at(services, channel)
+    verified_at = browser_verified_at(services, channel)
     fresh = verified_at is not None and now - verified_at <= max_age
     detail = (f"session verified {verified_at.isoformat()}" if verified_at else "never verified") + (
         "" if has_profile else f"; no browser profile at {profile}"
     )
     if not (fresh and has_profile):
         flag = " --account research" if channel is Channel.RESEARCH else ""
-        detail += f" -> run `insta-outreach browser login{flag}`, then `insta-outreach browser probe{flag}`"
+        detail += (
+            " -> Mission Control: Settings > Instagram accounts > Log in, then Test login"
+            f" (or `insta-outreach browser login{flag}`, then `insta-outreach browser probe{flag}`)"
+        )
     return Check(name, fresh and has_profile, detail, True)
 
 
-def _browser_verified_at(services: Services, channel: Channel = Channel.BROWSER) -> datetime | None:
+def browser_verified_at(services: Services, channel: Channel = Channel.BROWSER) -> datetime | None:
     marker = services.runtime.browser_session(channel).get("verified_at")
     candidates = [utc(datetime.fromisoformat(marker))] if marker else []
     with services.db.session() as session:

@@ -7,6 +7,8 @@ commands to start the service instead of running them.
 
 from __future__ import annotations
 
+import os
+import re
 import secrets
 import sys
 from dataclasses import dataclass, field
@@ -40,6 +42,36 @@ def ensure_env_file(root: Path) -> tuple[bool, str | None]:
         lines.append(f"CONTROL_API_TOKEN={token}")
     env.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return created, token
+
+
+_ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+
+
+def set_env_values(env: Path, values: dict[str, str | None]) -> None:
+    """Set (or, with None, remove) ``KEY=value`` lines in ``.env``, keeping every
+    other line and comment. Values must be a single line: a newline would let a
+    value smuggle in another variable."""
+    for key, value in values.items():
+        if not _ENV_NAME.match(key):
+            raise ValueError(f"not an environment variable name: {key!r}")
+        if value is not None and (not value.strip() or any(c in value for c in "\r\n\x00")):
+            raise ValueError(f"{key}: the value must be one non-empty line")
+    lines = env.read_text(encoding="utf-8").splitlines() if env.exists() else []
+    pending = dict(values)
+    kept: list[str] = []
+    for line in lines:
+        key, sep, _ = line.partition("=")
+        name = key.strip().removeprefix("export ").strip()
+        if sep and name in values:
+            value = pending.pop(name, None)
+            if value is not None:
+                kept.append(f"{name}={value.strip()}")
+            continue  # removed, or a duplicate of a line already rewritten
+        kept.append(line)
+    kept += [f"{name}={value.strip()}" for name, value in pending.items() if value is not None]
+    temp = env.with_name(env.name + ".tmp")
+    temp.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    os.replace(temp, env)
 
 
 @dataclass
@@ -118,3 +150,26 @@ def service_plan(platform: str, root: Path, python: Path, home: Path) -> Service
 
 def current_service_plan(root: Path) -> ServicePlan:
     return service_plan(sys.platform, root.resolve(), Path(sys.executable), Path.home())
+
+
+def launcher(platform: str, root: Path, python: Path) -> tuple[Path, str]:
+    """A file to double-click: starts the program and opens Mission Control.
+    Closing its window stops the program."""
+    if platform == "win32":
+        content = (
+            "@echo off\r\ntitle Mission Control - keep this window open while it runs\r\n"
+            f'set PYTHONUTF8=1\r\ncd /d "{root}"\r\n"{python}" -m insta_outreach run --open\r\n'
+            "echo.\r\necho Mission Control has stopped. Press any key to close this window.\r\npause >nul\r\n"
+        )
+        return root / "Mission Control.cmd", content
+    name = "Mission Control.command" if platform == "darwin" else "mission-control.sh"
+    content = f'#!/bin/sh\ncd "{root}" || exit 1\nexec "{python}" -m insta_outreach run --open\n'
+    return root / name, content
+
+
+def write_launcher(root: Path) -> Path:
+    path, content = launcher(sys.platform, root.resolve(), Path(sys.executable))
+    path.write_text(content, encoding="utf-8", newline="")
+    if sys.platform != "win32":
+        path.chmod(0o755)
+    return path

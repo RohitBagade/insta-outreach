@@ -70,7 +70,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
     """Prepare this computer: .env with a control token, config, Chromium, optional service file."""
     import subprocess
 
-    from insta_outreach.deploy import current_service_plan, ensure_env_file
+    from insta_outreach.deploy import current_service_plan, ensure_env_file, write_launcher
 
     root = Path.cwd()
     if not (root / "pyproject.toml").exists() or not (root / ".env.example").exists():
@@ -103,8 +103,11 @@ def cmd_setup(args: argparse.Namespace) -> int:
         for command in plan.stop:
             print(f"  {command}")
         print(f"logs:  {plan.logs}")
-    print("next: insta-outreach demo --watch --checkpoint   # Mission Control with simulated data")
-    print("      then docs/LIVE_CHECKLIST.md for the real account (browser login is yours to do)")
+    starter = write_launcher(root)
+    print(f"wrote {starter.name}: double-click it to start the program and open Mission Control")
+    print("next: insta-outreach demo --watch --checkpoint   # a sped-up simulated demo in Mission Control")
+    print(f"      or double-click {starter.name} (everything else, including the Instagram login, is in")
+    print("      Mission Control; docs/LIVE_CHECKLIST.md walks through going live)")
     return 0
 
 
@@ -364,6 +367,22 @@ def cmd_tick(args: argparse.Namespace) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
+    """Run until stopped; a restart requested from Mission Control (after a settings
+    change) rebuilds everything from the saved settings in this same process."""
+    from insta_outreach.api.server import Restarter
+
+    restarter = Restarter()
+    open_browser = bool(getattr(args, "open", False))
+    while True:
+        restarter.requested = False
+        code = _run_once(args, restarter, open_browser)
+        if not restarter.requested:
+            return code
+        open_browser = False  # the page reconnects by itself
+        print("\nrestarting with the settings saved in Mission Control...\n", flush=True)
+
+
+def _run_once(args: argparse.Namespace, restarter: Any, open_browser: bool) -> int:
     from insta_outreach.app import build_app, describe
     from insta_outreach.orchestrator.readiness import blocking
     from insta_outreach.reporting import preflight_view
@@ -400,13 +419,45 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     from insta_outreach.api.server import create_api
 
-    uvicorn.run(
-        create_api(app, run_orchestrator=True),
-        host=args.host or settings.control_api.host,
-        port=args.port or settings.control_api.port,
+    host = args.host or settings.control_api.host
+    port = args.port or settings.control_api.port
+    config = uvicorn.Config(
+        create_api(app, run_orchestrator=True, restarter=restarter),
+        host=host,
+        port=port,
         log_level="info",
+        timeout_graceful_shutdown=5,
     )
+    server = uvicorn.Server(config)
+    restarter.server = server
+    local = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
+    print(f"Mission Control: http://{local}:{port}/", flush=True)
+    if open_browser:
+        _open_when_started(server, _dashboard_link(local, port, settings))
+    server.run()
     return 0
+
+
+def _dashboard_link(host: str, port: int, settings: Settings) -> str:
+    """The page reads the token from the #fragment (never sent to the server) and
+    forgets it from the address bar, so nobody has to copy it out of .env."""
+    token = settings.control_api.token.get_secret_value() if settings.control_api.token else ""
+    return f"http://{host}:{port}/" + (f"#token={token}" if token else "")
+
+
+def _open_when_started(server: Any, url: str) -> None:
+    import threading
+    import time
+    import webbrowser
+
+    def wait_then_open() -> None:
+        for _ in range(600):
+            if getattr(server, "started", False):
+                webbrowser.open(url)
+                return
+            time.sleep(0.1)
+
+    threading.Thread(target=wait_then_open, daemon=True).start()
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
@@ -459,12 +510,9 @@ def cmd_browser(args: argparse.Namespace) -> int:
 
 def _browser_account(settings: Settings, which: str) -> tuple[Settings, Channel]:
     """The settings for one of our Instagram accounts: the brand account or the research account."""
-    if which != "research":
-        return settings, Channel.BROWSER
-    research = settings.research
-    if not (research.enabled and research.account.username):
-        raise ControlError("set research.enabled: true and research.account.username in config/settings.yaml first")
-    return settings.model_copy(update={"account": research.account}), Channel.RESEARCH
+    from insta_outreach.orchestrator.accounts import account_settings
+
+    return account_settings(settings, which)
 
 
 def _runtime(settings: Settings) -> Any:
@@ -617,6 +665,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(fn=cmd_pause)
     p = sub.add_parser("run", help="run orchestrator + control plane/webhooks")
     p.add_argument("--no-api", action="store_true")
+    p.add_argument("--open", action="store_true", help="open Mission Control in the browser once it is up")
     p.add_argument("--host")
     p.add_argument("--port", type=int)
     p.set_defaults(fn=cmd_run)

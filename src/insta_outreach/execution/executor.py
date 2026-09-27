@@ -136,14 +136,19 @@ class InstagramExecutor:
             kind=kind,
         )
 
+    def lane_lock(self, channel: Channel) -> asyncio.Semaphore:
+        """Held while a person uses this lane's browser profile (the login window)."""
+        return self._semaphores[channel]
+
     async def execute(
         self,
         request: OperationRequest,
         *,
         on_channel: ChannelHook | None = None,
         budgets: dict[Channel, int] | None = None,
+        only: Channel | None = None,
     ) -> ExecutionResult:
-        """Run the request on the best available channel.
+        """Run the request on the best available channel (or only on ``only``).
 
         ``on_channel`` is called before each attempt (the worker acquires or
         transfers the conversation lease there) and returns the guard to use,
@@ -151,7 +156,7 @@ class InstagramExecutor:
         """
         reasons: list[str] = []
         last: ExecutionResult | None = None
-        channels = self.candidate_channels(request.capability)
+        channels = [c for c in self.candidate_channels(request.capability) if only is None or c is only]
         for index, channel in enumerate(channels):
             adapter = self.adapters[channel]
             if not adapter.supports(request):
