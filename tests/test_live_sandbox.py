@@ -14,7 +14,7 @@ from insta_outreach.devtools.mock_instagram import STATE
 from insta_outreach.domain.enums import ActionStatus, Environment, LeadStatus, OperatingMode
 from insta_outreach.orchestrator.control import ControlError
 from insta_outreach.orchestrator.readiness import blocking
-from tests.conftest import run_ticks
+from tests.conftest import logged_in, run_ticks
 
 pytestmark = pytest.mark.browser
 
@@ -40,7 +40,7 @@ def sandbox_settings(tmp_path: Path, base_url: str) -> Settings:
     s.rollout.allowed_targets = [TEST_ACCOUNT]
     s.limits.outreach_per_day = 1
     s.limits.max_followups_per_lead = 0
-    return s
+    return logged_in(s)  # step 1 of the checklist: log in to the account by hand
 
 
 async def test_sandbox_rehearsal_follows_the_live_checklist(make_app, clock, tmp_path, mock_site) -> None:

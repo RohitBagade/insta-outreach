@@ -40,6 +40,7 @@ from insta_outreach.domain.enums import (
     MessageDirection,
     OperatingMode,
     ReplyIntent,
+    SalesStage,
     SenderKind,
     SuppressionKind,
 )
@@ -378,6 +379,18 @@ class UsageEvent(Base):
     units: Mapped[int] = mapped_column(Integer, default=1)
     action_id: Mapped[str | None] = mapped_column(String(40))
     at: Mapped[datetime]
+
+
+class LeadStage(Base):
+    """The sales stage Rohit gave a lead (interested, meeting, proposal, client, lost)."""
+
+    __tablename__ = "lead_stages"
+
+    lead_id: Mapped[int] = mapped_column(ForeignKey("leads.id", ondelete="CASCADE"), primary_key=True)
+    stage: Mapped[SalesStage] = mapped_column(enum_col(SalesStage), index=True)
+    note: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(default=_now)
+    updated_by: Mapped[str | None] = mapped_column(String(64))
 
 
 class RuntimeSetting(Base):

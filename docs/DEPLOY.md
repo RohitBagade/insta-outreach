@@ -18,7 +18,7 @@ Items marked ⚠ are third-party menus or commands that change between versions.
 Run it on a computer at home or in the office: a Mac, a Windows PC, a Linux box or a mini PC that stays on during the browser hours (09:30–21:30 IST). **Not a cloud server.**
 
 - **The browser lane uses @lemmedeliver's own logged-in session.** Instagram links a session to the device and network it was created on. A session that suddenly appears on a data-centre IP is a classic trigger for "Confirm it's you" checkpoints. On the computer and home connection you normally use, the lane looks like you.
-- **The first login is interactive.** `insta-outreach browser login` opens a visible browser window and you log in yourself, including 2FA. The system never types your password.
+- **The first login is interactive.** Mission Control → Settings → *Instagram accounts* → **Log in…** opens a visible browser window on this computer and you log in yourself, including 2FA. The system never types your password, and on the real account it does no browser work at all before that first login.
 - **Everything stays on your machine:**
   - the database (`data/live.db`);
   - the session cookies (`data/browser_profiles/`);
@@ -43,34 +43,32 @@ insta-outreach scenario --check                              # must print IDENTI
 - generates a long random `CONTROL_API_TOKEN` and prints it once. It never replaces one you already set;
 - creates `config/settings.yaml`, the data folders and the database;
 - installs Playwright's Chromium;
+- writes a file to double-click that starts the program and opens Mission Control, already signed in: `Mission Control.cmd` on Windows, `Mission Control.command` on macOS, `mission-control.sh` on Linux;
 - with `--service`, writes a start-at-log-in service for your OS (§4) using this folder's real paths, and prints the command to start it.
 
 The rest of `.env` is filled in during [LIVE_CHECKLIST](LIVE_CHECKLIST.md) Phase 1.
 
 ## 3. Start it and open Mission Control
 
-```bash
-insta-outreach run
-```
+Double-click the *Mission Control* file in the project folder. It starts the program and opens Mission Control at <http://127.0.0.1:8765>, signed in. Keep its window open: closing it stops the program. From a terminal the same is `insta-outreach run --open` (plain `insta-outreach run` starts it without opening the page; then paste the `CONTROL_API_TOKEN` from `.env` once per tab, or tick *Remember on this computer*).
 
-This starts the orchestrator plus **Mission Control** at <http://127.0.0.1:8765>. The first time, paste the `CONTROL_API_TOKEN`; the tab remembers it until you close it.
+After the first install, nothing needs the command line: every control is on a page.
 
-| Area | What it shows | What you can do |
+| Page | What it shows | What you can do |
 |---|---|---|
-| **Header** | environment (SIMULATION / LIVE), account, mode, connection, clock | switch mode (OBSERVE, DRAFT, APPROVAL, AUTONOMOUS), **Pause all** |
-| **Needs-you strip** | appears only when something needs you: Instagram stopped the browser, messages waiting for approval, chats handed to you | jump straight to each; **Resume…** |
-| **Right now** | one plain sentence on what the bot is doing, today's sends vs the limit, sending hours, and why anything is waiting | open *How to read this page* |
-| **Funnel** | Found → Good fit → Messaged → Replied → With you, with live counts. A box pulses when something happens in it. | click a box to see the list |
-| **What's happening** | a plain-English diary, newest first: messages sent, replies (quoted), handoffs, new businesses found, Instagram problems. Scrolling down to read stops new events pushing the list; a "↑ new" button brings you back. | filter: Messages, Replies, Problems; tick **Technical details** to also see every search, profile check and inbox read; click any @name |
-| **Today's limits** | usage vs caps, computed exactly as the gate enforces them | – |
-| **Instagram connections** | Official API, Browser (@lemmedeliver) and, if set up, the Research account: working / resting / stopped, and why | Stop, Resume (after *you* fixed the problem on Instagram) |
-| **Go-live checks** | the `preflight` checks that gate live AUTONOMOUS | – |
-| **Waiting for approval** | every message waiting for you, with the facts it is based on | edit, approve, reject & rewrite, reject |
-| **Chats** | who handles each chat: the bot or you | take over, hand back to the bot |
-| **Businesses found** | every business, its score and status in plain words | filter by status |
-| **Problems** | checkpoints, rate limits, restrictions, with the **screenshot** and page URL | resume once fixed |
-| **History (technical)** | the complete audit trail | filter by event type |
-| **@name drawer** | the chat as bubbles, and step by step why the bot did what it did | take over, never contact |
+| **Header and strip** (every page) | SIMULATION or LIVE, the mode, the program's clock; a coloured strip only when something needs you | switch mode (Observe, Draft, Approval, Autonomous), **Pause all**, **Resume…** |
+| **Dashboard** | one sentence on what the bot is doing; six numbers (found, good fit, messaged, replied, interested, clients) with the last 7 days; the funnel with conversion between steps; today's to-do list; the latest messages; account health and today's limits; the best prospects; recent activity; businesses by category | **Find businesses now**, review messages, stop or resume an account |
+| **Approvals** | every message waiting for you, next to the business's score, facts and why it is a fit | edit, approve, reject & rewrite, don't message |
+| **Businesses** | every business: category, place, followers, score, status, sales stage, when it was found | search, filter, **Add a business**, open its details |
+| **Chats** | every conversation, the ones waiting for your reply first, as chat bubbles | take over, hand back to the bot |
+| **Campaigns** | who to look for: kinds of business, places, and the ways to find them (search, hashtags, similar accounts, location pages, followers of an account, post commenters) | edit, switch on/off, add, delete; changes apply at once |
+| **Analytics** | reply rate, interested and clients per 100 messaged, found / messaged / replies per day, funnel conversion, results by source and by category | last 7, 14, 30 or 90 days |
+| **Activity** | the plain-English diary, newest first; the complete technical history | filter: Messages, Replies, Problems; **Technical details** |
+| **Problems** | checkpoints, rate limits, restrictions, with the **screenshot** and page URL | resume once *you* fixed it on Instagram |
+| **Settings** | where it runs, Instagram accounts, test mode, daily limits, hours, your messages, phone alerts, go-live checks, never contact, the safety rules in force, the program | switch to your real Instagram (and back), **Log in…**, **Test login**, research account, restart |
+| **Business details** (click any @name) | the chat, the sales stage, and step by step why the bot did what it did | set the sales stage, take over, never contact, open on Instagram |
+
+Settings saved on the page go to `config/settings.dashboard.yaml`, next to `settings.yaml`, which is never rewritten (its comments stay). Delete that file to go back to `settings.yaml` alone. Settings that change how the program is built (real Instagram or simulation, browser window, research account) apply after a restart: a blue bar offers **Restart now**, and the program restarts in place.
 
 Every button goes through the same audited control service as the CLI. The audit trail records who did what, and nothing on the page can skip a safety check.
 
@@ -197,26 +195,18 @@ With `notifications.min_severity: INFO` you also get the routine ones: new neutr
 
 Everything is also in the log and the audit trail. Telegram is free, works on any phone, and needs no app of ours.
 
-1. In Telegram, message **@BotFather** → `/newbot` → choose a name. Copy the token into `.env` as `TELEGRAM_BOT_TOKEN=…`.
-2. Open your new bot and press **Start** (or send it anything).
-3. Run the following, then copy the printed `TELEGRAM_CHAT_ID=…` line into `.env`:
+Set it up on Mission Control's Settings page, under *Phone alerts*:
 
-   ```bash
-   insta-outreach alerts find-chat
-   ```
+1. In Telegram, message **@BotFather** → `/newbot` → choose a name. Paste the token it gives you into *Create a bot* and press *Save token*. It is written to `.env` and never shown again.
+2. Open your new bot in Telegram and press **Start** (or send it anything). Then press **Find my chat**: your chat is found and saved.
+3. Press **Send a test alert**: a "🛑 Test alert" arrives on your phone.
 
-4. Check that alerts arrive:
-
-   ```bash
-   insta-outreach alerts test    # a "🛑 Test alert" arrives on your phone
-   ```
-
-5. Restart the service.
+Alerts start at once, no restart needed. Command line alternative: put `TELEGRAM_BOT_TOKEN=…` in `.env`, run `insta-outreach alerts find-chat` and copy the printed `TELEGRAM_CHAT_ID=…` line into `.env`, run `insta-outreach alerts test`, then restart.
 
 Notes:
 
-- Set `notifications.min_severity: CRITICAL` in `config/settings.yaml` for checkpoint-type alerts only.
-- **Privacy:** warm-lead alerts quote the prospect's reply, so that text passes through Telegram. If you prefer not to, use `min_severity: CRITICAL`.
+- Choose *Only when an account is stopped* under *Which alerts reach your phone* for checkpoint-type alerts only (`notifications.min_severity: CRITICAL`).
+- **Privacy:** warm-lead alerts quote the prospect's reply, so that text passes through Telegram. If you prefer not to, choose *Only when an account is stopped*.
 - Alerts are plain text: a prospect's message can never turn into a link or formatting trick.
 
 **n8n / Slack / Google Sheets instead (or as well):** set `NOTIFY_WEBHOOK_URL` to an n8n *Webhook* node (or any URL). Every alert is POSTed as JSON:
@@ -269,7 +259,7 @@ The callback URL for Meta is `https://hooks.<your-domain>/webhooks/instagram` (L
   - `data/live.db`: the database;
   - `.env`: secrets;
   - `config/settings.yaml`.
-- **Session cookies** (`data/browser_profiles/`) are equivalent to being logged in as @lemmedeliver. Never put them in a shared or public folder. If you move machines, log in again with `insta-outreach browser login` instead of copying them.
+- **Session cookies** (`data/browser_profiles/`) are equivalent to being logged in as @lemmedeliver. Never put them in a shared or public folder. If you move machines, log in again (Settings → *Instagram accounts* → *Log in…*) instead of copying them.
 - **Consistent database copy while running:**
 
   ```bash

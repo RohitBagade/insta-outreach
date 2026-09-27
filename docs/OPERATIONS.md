@@ -73,29 +73,33 @@ Why this lane matters:
 
 ## 5. Daily operation
 
-| Task | CLI | Mission Control (`http://127.0.0.1:8765`) |
+| Task | Mission Control (`http://127.0.0.1:8765`) | CLI |
 |---|---|---|
-| Overview: mode, lanes, counters, incidents | `insta-outreach status` | Header, attention strip, workflow, lanes |
-| Review / approve / edit / reject drafts | `approvals`, `approve <id> [--message "..."]`, `reject <id> --reason ... [--redraft]` | Approvals tab |
-| Leads and why they (don't) qualify | `leads [--status QUALIFIED]`, `explain @handle` | Leads tab; click a workflow step |
-| Every decision about one lead, in order | `explain @handle` | click any handle → decision trail |
-| Generated messages and their fate | `generated [outreach\|followup\|reply\|all]` | Approvals tab (waiting), Live activity |
-| Message log (sent, received, Rohit's own) | `messages [@handle]` | click any handle → conversation |
-| One action: gate decisions, attempts, evidence | `actions [--type …] [--status …]`, `action <id>` | – |
-| Audit trail | `audit [--kind mode\|message.sent\|lane\|…] [--subject @handle]` | Live activity; Audit trail tab |
-| Limits and stop behaviour in force | `safety` | Today's limits (usage vs caps) |
-| Live readiness (AUTONOMOUS prerequisites) | `preflight` | Go-live readiness |
-| Add a handle by hand (full pipeline) | `add-lead @handle [--note …]` | – |
-| Never-contact list | `suppressions` | – |
-| Take over a conversation | `claim @handle` | Conversations → Take over |
-| Hand a conversation back | `release @handle` | Conversations → Hand back |
-| Never contact someone | `suppress @handle` (or `--kind DOMAIN/PHONE/EMAIL`) | click the handle → Never contact |
-| Stop everything now | `pause on` / `pause off` | Pause all |
-| Halt / resume a lane | `lane halt browser`, `lane resume browser --note …` | Lanes, Incidents |
-| Alerts on your phone | `alerts find-chat`, `alerts test` | – (see [DEPLOY.md §6](DEPLOY.md#6-alerts-on-your-phone-telegram)) |
-| Change limits | `limits --set outreach_per_day=10 min_seconds_between_sends=300`, `limits --clear` | – |
+| Overview: mode, lanes, counters, problems | Dashboard, header, strip | `insta-outreach status` |
+| Review / approve / edit / reject drafts | Approvals | `approvals`, `approve <id> [--message "..."]`, `reject <id> --reason ... [--redraft]` |
+| Businesses and why they (don't) qualify | Businesses (search, filter); Dashboard → Funnel steps | `leads [--status QUALIFIED]`, `explain @handle` |
+| Every decision about one business, in order | click any @name → *Why the bot did what it did* | `explain @handle` |
+| Latest messages and their fate | Dashboard → Latest messages; Approvals | `generated [outreach\|followup\|reply\|all]` |
+| Message log (sent, received, your own) | Chats; click any @name | `messages [@handle]` |
+| Sales stage (interested → client) | click any @name → *Sales stage* | – |
+| Results over time | Analytics | – |
+| One action: gate decisions, attempts, evidence | Activity with *Technical details* | `actions [--type …] [--status …]`, `action <id>` |
+| Audit trail | Activity → History (technical) | `audit [--kind mode\|message.sent\|lane\|…] [--subject @handle]` |
+| Limits and stop behaviour in force | Settings → Daily limits, Safety rules; Dashboard → Account health | `safety` |
+| Live readiness (AUTONOMOUS prerequisites) | Settings → Go-live checks | `preflight` |
+| Add a business by hand (full pipeline) | Businesses → Add a business | `add-lead @handle [--note …]` |
+| Who to look for, and how | Campaigns; **Find businesses now** | `config/settings.yaml` → `campaigns` |
+| Never-contact list | Settings → Never contact | `suppressions`, `suppress`, `unsuppress` |
+| Take over / hand back a conversation | Chats → Take over / Hand back | `claim @handle`, `release @handle` |
+| Never contact someone | click the @name → Never contact | `suppress @handle` (or `--kind DOMAIN/PHONE/EMAIL`) |
+| Stop everything now | Pause all | `pause on` / `pause off` |
+| Stop / resume an Instagram account | Dashboard → Account health; Problems | `lane halt browser`, `lane resume browser --note …` |
+| Log in to Instagram, test the login | Settings → Instagram accounts | `browser login`, `browser probe` (`--account research`) |
+| Real Instagram or the simulation, test mode, hours | Settings | `config/settings.yaml` |
+| Alerts on your phone | Settings → Phone alerts | `alerts find-chat`, `alerts test` |
+| Change limits | Settings → Daily limits | `limits --set outreach_per_day=10 min_seconds_between_sends=300`, `limits --clear` |
 
-With `CONTROL_API_TOKEN` set, Mission Control asks for the token once per browser tab and the HTTP API expects `Authorization: Bearer <token>`. **In live mode the control plane refuses to work without a token** (503).
+With `CONTROL_API_TOKEN` set, Mission Control opened by the *Mission Control* file or `run --open` is signed in already; otherwise it asks for the token once per browser tab and the HTTP API expects `Authorization: Bearer <token>`. **In live mode the control plane refuses to work without a token** (503).
 
 ## 6. Working alongside automation
 

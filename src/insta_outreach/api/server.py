@@ -31,20 +31,28 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from insta_outreach.app import App
 from insta_outreach.domain.enums import (
     ActionStatus,
+    Capability,
     Channel,
     Environment,
     LeadStatus,
     OperatingMode,
+    SalesStage,
     SuppressionKind,
 )
+from insta_outreach.editable_settings import SettingsError
 from insta_outreach.orchestrator.control import ControlError
-from insta_outreach.reporting import explain_lead
+from insta_outreach.policy.audit import audit
+from insta_outreach.reporting import explain_lead, safety_view
 from insta_outreach.webhooks import verify_signature
 
 log = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).with_name("static")
-_STATIC_TYPES = {"app.js": "text/javascript; charset=utf-8", "app.css": "text/css; charset=utf-8"}
+_STATIC_TYPES = {
+    "app.js": "text/javascript; charset=utf-8",
+    "pages.js": "text/javascript; charset=utf-8",
+    "app.css": "text/css; charset=utf-8",
+}
 _PAGE_HEADERS = {
     "Content-Security-Policy": (
         "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; "
@@ -57,7 +65,21 @@ _PAGE_HEADERS = {
 }
 
 
-def create_api(app: App, run_orchestrator: bool = False) -> FastAPI:
+class Restarter:
+    """Lets Mission Control restart the program in place after a settings change
+    (``insta-outreach run`` rebuilds everything from the saved settings)."""
+
+    def __init__(self) -> None:
+        self.requested = False
+        self.server: Any = None  # the uvicorn.Server currently serving
+
+    def request(self) -> None:
+        self.requested = True
+        if self.server is not None:
+            self.server.should_exit = True
+
+
+def create_api(app: App, run_orchestrator: bool = False, restarter: Restarter | None = None) -> FastAPI:
     settings = app.settings
     token = settings.control_api.token.get_secret_value() if settings.control_api.token else None
 
@@ -77,7 +99,15 @@ def create_api(app: App, run_orchestrator: bool = False) -> FastAPI:
         finally:
             stop.set()
             if task is not None:
-                await task
+                # A step in progress may be pacing itself for minutes: give it a moment to
+                # finish, then interrupt it (interrupted actions are recovered at the next
+                # start, and a send re-checks the thread first, so nothing is sent twice).
+                try:
+                    await asyncio.wait_for(asyncio.shield(task), timeout=10)
+                except TimeoutError:
+                    task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await task
             await app.close()
 
     api = FastAPI(title="insta-outreach control plane", version="0.1.0", lifespan=lifespan)
@@ -94,7 +124,13 @@ def create_api(app: App, run_orchestrator: bool = False) -> FastAPI:
     def guarded(fn: Any) -> Any:
         try:
             return fn()
-        except ControlError as exc:
+        except (ControlError, SettingsError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    async def guarded_async(fn: Any) -> Any:
+        try:
+            return await fn()
+        except (ControlError, SettingsError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # ---------------------------------------------------------------- webhooks
@@ -141,6 +177,14 @@ def create_api(app: App, run_orchestrator: bool = False) -> FastAPI:
     def overview(_: str = Depends(require_token)) -> dict[str, Any]:
         return app.monitor.overview()
 
+    @api.get("/api/dashboard")
+    def dashboard_data(_: str = Depends(require_token)) -> dict[str, Any]:
+        return app.monitor.dashboard()
+
+    @api.get("/api/analytics")
+    def analytics(days: int = Query(default=14, ge=7, le=90), _: str = Depends(require_token)) -> dict[str, Any]:
+        return app.monitor.analytics(days)
+
     @api.get("/api/feed")
     def feed(
         audit: int | None = Query(default=None, ge=0),
@@ -183,13 +227,16 @@ def create_api(app: App, run_orchestrator: bool = False) -> FastAPI:
 
     @api.get("/api/actions")
     async def actions(
-        status: list[str] = Query(default=[]), limit: int = 50, _: str = Depends(require_token)
+        status: list[str] = Query(default=[]),
+        limit: int = 50,
+        with_lead: bool = False,
+        _: str = Depends(require_token),
     ) -> list[dict[str, Any]]:
         try:
             statuses = [ActionStatus(s.upper()) for s in status]
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return app.control.list_actions(statuses or None, limit)
+        return app.control.list_actions(statuses or None, limit, with_lead=with_lead)
 
     @api.get("/api/actions/{action_id}")
     async def action_detail(action_id: str, _: str = Depends(require_token)) -> dict[str, Any]:
@@ -233,6 +280,17 @@ def create_api(app: App, run_orchestrator: bool = False) -> FastAPI:
     def explain(ref: str, _: str = Depends(require_token)) -> dict[str, Any]:
         """The lead's decision trail: every step, gate verdict and message, in order."""
         return {"lines": guarded(lambda: explain_lead(app, ref))}
+
+    @api.put("/api/leads/{ref}/stage")
+    def set_stage(ref: str, body: dict[str, Any] = Body(...), who: str = Depends(require_token)) -> dict[str, Any]:
+        raw = body.get("stage")
+        try:
+            stage = SalesStage(str(raw).upper()) if raw else None
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400, detail=f"stage must be one of {[s.value for s in SalesStage]}"
+            ) from exc
+        return guarded(lambda: app.control.set_stage(ref, stage, by=who, note=str(body.get("note") or "")[:500]))
 
     @api.post("/api/leads")
     async def add_lead(body: dict[str, Any] = Body(...), who: str = Depends(require_token)) -> dict[str, Any]:
@@ -311,6 +369,104 @@ def create_api(app: App, run_orchestrator: bool = False) -> FastAPI:
     @api.post("/api/tick")
     async def tick(_: str = Depends(require_token)) -> dict[str, Any]:
         return (await app.orchestrator.tick()).as_dict()
+
+    # ------------------------------------------------------------------ setup
+    def setup_view() -> dict[str, Any]:
+        return app.setup.view() | {"restart_supported": restarter is not None}
+
+    @api.get("/api/setup")
+    def get_setup(_: str = Depends(require_token)) -> dict[str, Any]:
+        return setup_view()
+
+    @api.patch("/api/setup")
+    def change_setup(body: dict[str, Any] = Body(...), who: str = Depends(require_token)) -> dict[str, Any]:
+        changes = body.get("changes")
+        if not isinstance(changes, dict) or not changes:
+            raise HTTPException(status_code=400, detail="send {'changes': {setting: value}}")
+        outcome = guarded(lambda: app.setup.change(changes, by=who))
+        return outcome | {"setup": setup_view()}
+
+    @api.post("/api/setup/restart")
+    async def restart(who: str = Depends(require_token)) -> dict[str, Any]:
+        if restarter is None:
+            raise HTTPException(
+                status_code=409, detail="restart the program yourself (this one was not started with `run`)"
+            )
+        log.warning("restart requested from Mission Control by %s", who)
+        asyncio.get_running_loop().call_later(0.3, restarter.request)  # let this answer reach the page first
+        return {"restarting": True}
+
+    @api.post("/api/accounts/{which}/login")
+    async def account_login(which: str, who: str = Depends(require_token)) -> dict[str, Any]:
+        return guarded(lambda: app.setup.accounts.start_login(which, by=who))
+
+    @api.post("/api/accounts/{which}/check")
+    async def account_check(which: str, who: str = Depends(require_token)) -> dict[str, Any]:
+        return guarded(lambda: app.setup.accounts.start_check(which, by=who))
+
+    @api.post("/api/alerts/telegram")
+    def alerts_telegram(body: dict[str, Any] = Body(...), who: str = Depends(require_token)) -> dict[str, Any]:
+        return guarded(
+            lambda: app.setup.save_telegram(
+                who,
+                bot_token=body.get("bot_token") if body.get("bot_token") else None,
+                chat_id=str(body["chat_id"]) if body.get("chat_id") else None,
+            )
+        )
+
+    @api.post("/api/alerts/find-chat")
+    async def alerts_find_chat(who: str = Depends(require_token)) -> dict[str, Any]:
+        return await guarded_async(lambda: app.setup.find_telegram_chat(who))
+
+    @api.post("/api/alerts/test")
+    async def alerts_test(_: str = Depends(require_token)) -> dict[str, Any]:
+        return await guarded_async(app.setup.test_alert)
+
+    @api.get("/api/safety")
+    def safety(_: str = Depends(require_token)) -> dict[str, Any]:
+        return {"lines": safety_view(app)}
+
+    @api.get("/api/campaigns")
+    def campaigns(_: str = Depends(require_token)) -> dict[str, Any]:
+        return app.setup.campaigns()
+
+    @api.put("/api/campaigns")
+    def save_campaigns(body: dict[str, Any] = Body(...), who: str = Depends(require_token)) -> dict[str, Any]:
+        guarded(lambda: app.setup.change({"campaigns": body.get("campaigns")}, by=who))
+        return app.setup.campaigns()
+
+    @api.post("/api/discovery/run")
+    def discover_now(who: str = Depends(require_token)) -> dict[str, Any]:
+        """Look for new businesses now instead of at the next scheduled search."""
+        if not any(c.enabled for c in settings.campaigns):
+            raise HTTPException(status_code=400, detail="No campaign is switched on: turn one on in Campaigns first.")
+        if app.runtime.paused():
+            raise HTTPException(status_code=400, detail="Everything is paused: press Resume first.")
+        planned = app.pipeline.plan_discovery(force=True)
+        with app.db.session() as session:
+            audit(
+                session,
+                app.clock.now(),
+                actor=who,
+                kind="discovery.requested",
+                subject="discovery",
+                summary=f"discovery requested by {who}: {planned} search(es) queued",
+                planned=planned,
+            )
+            searchers = app.executor.candidate_channels(Capability.SEARCH_ACCOUNTS)
+            stopped = [
+                c for c in searchers if not app.lanes.snapshot(session, settings.account.id, c).is_open(app.clock.now())
+            ]
+        if not planned:
+            message = (
+                "Nothing new to search right now: today's search limit is used up or every search ran recently."
+                " It carries on by itself later."
+            )
+        else:
+            message = f"Queued {planned} search{'es' if planned != 1 else ''}. New businesses appear as they're found."
+        if stopped:
+            message += " The account that searches is stopped or resting, so they wait until it runs again."
+        return {"planned": planned, "message": message}
 
     @api.get("/api/evidence/{path:path}")
     def evidence(path: str, _: str = Depends(require_token)) -> FileResponse:

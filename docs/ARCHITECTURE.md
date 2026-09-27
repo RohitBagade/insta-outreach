@@ -259,8 +259,13 @@ Rohit uses the same account. Each conversation (`Conversation` row, keyed by use
 - **Mission Control** (`orchestrator/monitor.py`, `api/static/`).
   - `/api/overview`: pipeline counts, lanes, and limit usage. The usage is read from the same usage ledger the gate enforces.
   - `/api/feed`: the audit trail merged with every executor attempt, served by cursor so the page polls without missing or repeating an event.
-  - The page is static: a strict Content-Security-Policy, no inline script, and all external text inserted as text.
+  - `/api/dashboard`, `/api/analytics`: the home page's totals with the last 7 days, the latest messages, the best prospects, and results per day, category and discovery source. Sales stages (`lead_stages`, set by Rohit; an interested reply counts as interested) extend the funnel to clients.
+  - The page is static (`index.html`, `app.js` for the shell, `pages.js` for the pages): a strict Content-Security-Policy, no inline script, and all external text inserted as text.
   - Its buttons call the same audited `ControlService` as the CLI.
+- **Settings page** (`orchestrator/setup.py`).
+  - Editable settings (`editable_settings.py`) are a fixed list, validated through the full settings model and written to `config/settings.dashboard.yaml`, which `load_settings` applies over `settings.yaml` (environment variables still win). Most apply at once to the shared settings object; those that shape how the program is built (environment, browser, research account) apply after `run` restarts itself in place (`Restarter`).
+  - Instagram logins (`orchestrator/accounts.py`) run as background jobs: the lane is stopped while the login window holds the browser profile, then restored. *Test login* is a read-only look at the account's own profile through the normal lane, so a checkpoint during it stops the lane like any real step. In live, the gate treats a browser account with no saved profile as not ready (`Settings.first_login_pending`): the bot does no browser work before the first login.
+  - Phone alerts: the Telegram token and chat id are validated to one line, written to `.env`, and the alert destinations are rebuilt without a restart.
 - **Verification** (`verification.py`). `demo`, `scenario` and `browser-demo`. The scenario is deterministic: fixed clock, fixed seed, templates, and action ids derived from idempotency keys. Its transcript is committed as `docs/verification/expected_scenario.txt`.
 
 ## Environments

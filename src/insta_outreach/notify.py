@@ -151,6 +151,10 @@ class FanoutNotifier:
         self._notifiers = notifiers
         self.sent: list[dict[str, Any]] = []
 
+    def reconfigure(self, *notifiers: Notifier) -> None:
+        """Swap the destinations in place (alerts set up from Mission Control, no restart)."""
+        self._notifiers = notifiers
+
     async def notify(
         self, title: str, detail: str, severity: IncidentSeverity, data: dict[str, Any] | None = None
     ) -> None:

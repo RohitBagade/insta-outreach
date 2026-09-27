@@ -3,105 +3,227 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Outreach Mission Control</title>
+<title>Mission Control · LemmeDeliver</title>
 <link rel="stylesheet" href="/static/app.css">
 <script src="/static/app.js" defer></script>
+<script src="/static/pages.js" defer></script>
 </head>
 <body>
-<header class="top">
-  <div class="brand">
-    <strong>Mission Control</strong>
-    <span class="env" id="env">…</span>
-    <span class="muted" id="account"></span>
-  </div>
-  <div class="modes" role="group" aria-label="Operating mode" id="modes">
-    <button data-mode="OBSERVE" title="Finds and checks businesses. Never writes or sends anything.">Observe</button>
-    <button data-mode="DRAFT" title="Also writes messages for you to read. Never sends.">Draft</button>
-    <button data-mode="APPROVAL" title="Sends only the messages you approve.">Approval</button>
-    <button data-mode="AUTONOMOUS" title="Sends on its own, within every limit.">Autonomous</button>
-  </div>
-  <div class="right">
-    <button id="pause" class="pause">Pause all</button>
-    <span class="conn" id="conn" title="Connection to the program">● connecting</span>
-    <span class="clock" id="clock" title="The program's clock"></span>
-  </div>
-</header>
-
-<div class="attention" id="attention" hidden></div>
-
-<main>
-  <section class="card now" id="now">
-    <div class="now-head">
-      <span id="nowMark"></span>
-      <h1 id="nowText">Loading…</h1>
+<div class="shell">
+  <aside class="nav" id="nav" aria-label="Pages">
+    <div class="logo">
+      <span class="mark" aria-hidden="true">L</span>
+      <div><strong>LemmeDeliver</strong><span class="muted small">Outreach Mission Control</span></div>
     </div>
-    <ul class="now-lines" id="nowLines"></ul>
-    <details class="help">
-      <summary>How to read this page</summary>
-      <ol>
-        <li><b>Right now</b> (this box) says in one sentence what the bot is doing.</li>
-        <li><b>The five boxes</b> are your funnel: businesses found → good fit → messaged → replied → handed to you. Click a box to see the list.</li>
-        <li><b>The coloured strip</b> at the top appears only when something needs you: an approval, a reply or an Instagram problem.</li>
-        <li><b>What's happening</b> is a plain-English diary, newest first. Tick <i>Technical details</i> to also see every search, profile check and inbox read.</li>
-        <li>Click any <b>@name</b> to see the chat and why the bot did each thing.</li>
-      </ol>
-    </details>
-  </section>
+    <nav id="navLinks">
+      <a href="#/dashboard" data-page="dashboard"><i data-icon="grid"></i>Dashboard</a>
+      <a href="#/approvals" data-page="approvals"><i data-icon="check"></i>Approvals <span class="badge" id="b-approvals"></span></a>
+      <a href="#/leads" data-page="leads"><i data-icon="users"></i>Businesses</a>
+      <a href="#/chats" data-page="chats"><i data-icon="chat"></i>Chats <span class="badge" id="b-chats"></span></a>
+      <a href="#/campaigns" data-page="campaigns"><i data-icon="target"></i>Campaigns</a>
+      <a href="#/analytics" data-page="analytics"><i data-icon="chart"></i>Analytics</a>
+      <a href="#/activity" data-page="activity"><i data-icon="activity"></i>Activity</a>
+      <a href="#/problems" data-page="problems"><i data-icon="alert"></i>Problems <span class="badge crit" id="b-problems"></span></a>
+      <a href="#/settings" data-page="settings"><i data-icon="settings"></i>Settings <span class="badge crit" id="b-settings"></span></a>
+    </nav>
+    <div class="nav-foot">
+      <strong id="account"></strong>
+      <span class="conn" id="conn" title="Connection to the program">● connecting</span>
+    </div>
+  </aside>
 
-  <section class="card">
-    <div class="flow" id="flow" aria-label="Funnel"></div>
-  </section>
-
-  <div class="split">
-    <section class="card feed-card">
-      <div class="card-head">
-        <h2>What's happening</h2>
-        <div class="chips" id="feedFilters">
-          <button data-filter="all" class="on">Everything</button>
-          <button data-filter="messages">Messages</button>
-          <button data-filter="replies">Replies</button>
-          <button data-filter="problems">Problems</button>
+  <div class="main">
+    <header class="top">
+      <button class="ghost menu" id="menuBtn" aria-label="Open the menu"><i data-icon="menu"></i></button>
+      <div class="top-title"><h1 id="pageTitle">Dashboard</h1><span class="env" id="env">…</span></div>
+      <div class="top-actions">
+        <div class="modes" role="group" aria-label="Operating mode" id="modes">
+          <button data-mode="OBSERVE" title="Finds and checks businesses. Never writes or sends anything.">Observe</button>
+          <button data-mode="DRAFT" title="Also writes messages for you to read. Never sends.">Draft</button>
+          <button data-mode="APPROVAL" title="Sends only the messages you approve.">Approval</button>
+          <button data-mode="AUTONOMOUS" title="Sends on its own, within every limit.">Autonomous</button>
         </div>
-        <label class="tech-toggle"><input type="checkbox" id="techToggle"> Technical details</label>
+        <button id="pause" class="pause"><i data-icon="pause"></i><span>Pause all</span></button>
+        <span class="clock" id="clock" title="The program's clock"></span>
       </div>
-      <div class="feed-wrap">
-        <button class="new-pill" id="newPill" hidden>↑ new</button>
-        <ol class="feed" id="feed" aria-live="polite"></ol>
-      </div>
-    </section>
-
-    <aside class="side">
-      <section class="card">
-        <h2>Today's limits</h2>
-        <div id="meters"></div>
-      </section>
-      <section class="card">
-        <h2>Instagram connections</h2>
-        <div id="lanes"></div>
-      </section>
-      <section class="card">
-        <h2>Go-live checks</h2>
-        <div id="preflight" class="small"></div>
-      </section>
-    </aside>
-  </div>
-
-  <section class="card">
-    <div class="tabs" role="tablist" id="tabs">
-      <button data-tab="approvals" class="on">Waiting for approval <span class="count" id="c-approvals"></span></button>
-      <button data-tab="conversations">Chats <span class="count" id="c-conversations"></span></button>
-      <button data-tab="leads">Businesses found</button>
-      <button data-tab="incidents">Problems <span class="count" id="c-incidents"></span></button>
-      <button data-tab="audit">History (technical)</button>
+    </header>
+    <div class="attention" id="attention" hidden></div>
+    <div class="banner" id="restartBanner" hidden>
+      <span id="restartText">Some saved settings apply after a restart.</span>
+      <button class="primary small" id="restartBtn">Restart now</button>
     </div>
-    <div id="tab" class="tab-body"></div>
-  </section>
-</main>
 
-<aside class="drawer" id="drawer" hidden>
+    <main id="content">
+      <!-- Dashboard -->
+      <section class="page" id="page-dashboard" data-title="Dashboard">
+        <div class="card hero" id="now">
+          <div class="hero-main">
+            <div class="now-head"><span id="nowMark"></span><h2 id="nowText">Loading…</h2></div>
+            <ul class="now-lines" id="nowLines"></ul>
+          </div>
+          <div class="hero-actions">
+            <button class="primary" id="findNow"><i data-icon="search"></i>Find businesses now</button>
+            <a class="btn" href="#/approvals" id="reviewBtn"><i data-icon="check"></i>Review messages</a>
+          </div>
+        </div>
+        <div class="kpis" id="kpis"></div>
+        <div class="grid-2">
+          <section class="card">
+            <div class="card-head"><h3>Funnel</h3><span class="sub">since the start · click a step for the list</span></div>
+            <div class="funnel" id="funnel"></div>
+          </section>
+          <section class="card">
+            <div class="card-head"><h3>Today's progress</h3><span class="sub" id="todayDate"></span></div>
+            <ul class="progress" id="progress"></ul>
+          </section>
+        </div>
+        <div class="grid-2 wide-left">
+          <section class="card">
+            <div class="card-head"><h3>Latest messages</h3><a class="link small" href="#/approvals">Approvals</a></div>
+            <div class="list" id="todayList"></div>
+          </section>
+          <section class="card">
+            <div class="card-head"><h3>Account health</h3><a class="link small" href="#/settings">Settings</a></div>
+            <div id="lanes"></div>
+            <div class="health-meters" id="meters"></div>
+          </section>
+        </div>
+        <div class="grid-2 wide-left">
+          <section class="card">
+            <div class="card-head"><h3>Top opportunities</h3><a class="link small" href="#/leads">All businesses</a></div>
+            <div class="list" id="topList"></div>
+          </section>
+          <section class="card">
+            <div class="card-head"><h3>Recent activity</h3><a class="link small" href="#/activity">See everything</a></div>
+            <ol class="recent" id="recent"></ol>
+          </section>
+        </div>
+        <section class="card chart-card">
+          <div class="card-head"><h3>Businesses found, by category</h3><span class="sub">hover a bar for the numbers</span></div>
+          <div id="categories"></div>
+        </section>
+        <details class="card help">
+          <summary>How to read this page</summary>
+          <ol>
+            <li><b>The top box</b> says in one sentence what the bot is doing right now.</li>
+            <li><b>The six numbers</b> are your funnel: found, good fit, messaged, replied, interested, clients. The small line under each is the last 7 days.</li>
+            <li><b>The coloured strip</b> under the header appears only when something needs you: an approval, a reply or an Instagram problem.</li>
+            <li><b>Today's progress</b> is your to-do list for today; everything ticks itself off.</li>
+            <li>Click any <b>@name</b> to see the chat and why the bot did each thing. Everything is also in the menu on the left.</li>
+          </ol>
+        </details>
+      </section>
+
+      <!-- Approvals -->
+      <section class="page" id="page-approvals" data-title="Approvals" hidden>
+        <p class="page-intro" id="approvalsIntro">Messages the bot wrote and is holding for you. Read them, change anything you like, then approve. Nothing is sent without your click.</p>
+        <div class="stack" id="approvals"></div>
+      </section>
+
+      <!-- Businesses -->
+      <section class="page" id="page-leads" data-title="Businesses" hidden>
+        <div class="toolbar">
+          <input type="search" id="leadSearch" placeholder="Search a name or @handle" aria-label="Search businesses">
+          <select id="leadStatus" aria-label="Filter by status"></select>
+          <select id="leadNiche" aria-label="Filter by category"></select>
+          <span class="muted small" id="leadCount"></span>
+          <span class="spacer"></span>
+          <button class="primary" id="addLeadBtn"><i data-icon="plus"></i>Add a business</button>
+        </div>
+        <div class="card flush"><div class="table-wrap" id="leadsTable"></div></div>
+      </section>
+
+      <!-- Chats -->
+      <section class="page" id="page-chats" data-title="Chats" hidden>
+        <div class="card flush chats">
+          <div class="chat-list" id="chatList"></div>
+          <div class="chat-view" id="chatView"><div class="empty chat-body">Pick a chat on the left.</div></div>
+        </div>
+      </section>
+
+      <!-- Campaigns -->
+      <section class="page" id="page-campaigns" data-title="Campaigns" hidden>
+        <div class="toolbar">
+          <p class="page-intro">Who the bot looks for and how it finds them. Saved changes apply straight away.</p>
+          <span class="spacer"></span>
+          <button id="addCampaign"><i data-icon="plus"></i>New campaign</button>
+          <button class="primary" id="findNow2"><i data-icon="search"></i>Find businesses now</button>
+        </div>
+        <div class="stack" id="campaigns"></div>
+      </section>
+
+      <!-- Analytics -->
+      <section class="page" id="page-analytics" data-title="Analytics" hidden>
+        <div class="toolbar">
+          <div class="chips" id="rangeChips" role="group" aria-label="Time range">
+            <button data-days="7">Last 7 days</button>
+            <button data-days="14" class="on">Last 14 days</button>
+            <button data-days="30">Last 30 days</button>
+            <button data-days="90">Last 90 days</button>
+          </div>
+        </div>
+        <div class="stats" id="rates"></div>
+        <div class="grid-3" id="daily"></div>
+        <div class="grid-2">
+          <section class="card chart-card">
+            <h3>Funnel conversion</h3>
+            <p class="sub small muted">since the start; each bar is the share of businesses found</p>
+            <div id="funnelChart"></div>
+          </section>
+          <section class="card">
+            <div class="card-head"><h3>Where businesses come from</h3></div>
+            <div class="table-wrap" id="sourceTable"></div>
+          </section>
+        </div>
+        <section class="card">
+          <div class="card-head"><h3>By category</h3><span class="sub">reply rate = replied ÷ messaged</span></div>
+          <div class="table-wrap" id="nicheTable"></div>
+        </section>
+      </section>
+
+      <!-- Activity -->
+      <section class="page" id="page-activity" data-title="Activity" hidden>
+        <section class="card">
+          <div class="card-head">
+            <div class="chips" id="feedFilters">
+              <button data-filter="all" class="on">Everything</button>
+              <button data-filter="messages">Messages</button>
+              <button data-filter="replies">Replies</button>
+              <button data-filter="problems">Problems</button>
+            </div>
+            <label class="tech-toggle"><input type="checkbox" id="techToggle"> Technical details</label>
+          </div>
+          <div class="feed-wrap">
+            <button class="new-pill" id="newPill" hidden>↑ new</button>
+            <ol class="feed" id="feed" aria-live="polite"></ol>
+          </div>
+        </section>
+        <details class="card" id="historyBox">
+          <summary>History (technical): every recorded event, never edited or deleted</summary>
+          <div id="history"></div>
+        </details>
+      </section>
+
+      <!-- Problems -->
+      <section class="page" id="page-problems" data-title="Problems" hidden>
+        <p class="page-intro">When Instagram asks to confirm it's you, logs the account out or says to slow down, the bot stops that account and shows it here with a screenshot. It never tries to get past these checks: you fix it in Instagram, then press Resume.</p>
+        <div class="stack" id="problems"></div>
+      </section>
+
+      <!-- Settings -->
+      <section class="page" id="page-settings" data-title="Settings" hidden>
+        <div class="settings-nav chips" id="settingsNav"></div>
+        <div class="set-grid" id="settings"></div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" hidden aria-label="Business details">
   <div class="drawer-head">
     <h2 id="drawerTitle"></h2>
-    <button id="drawerClose" aria-label="Close">✕</button>
+    <button class="ghost" id="drawerClose" aria-label="Close"><i data-icon="x"></i></button>
   </div>
   <div id="drawerBody" class="drawer-body"></div>
 </aside>
@@ -109,12 +231,38 @@
 <dialog id="tokenDialog">
   <form method="dialog">
     <h2>Control token</h2>
-    <p class="small muted">Paste the <code>CONTROL_API_TOKEN</code> from the <code>.env</code> file in your project folder. This browser tab keeps it until you close it.</p>
+    <p class="small muted">Starting Mission Control with the <b>Mission Control</b> file (or <code>insta-outreach run --open</code>) fills this in for you. Otherwise paste <code>CONTROL_API_TOKEN</code> from the <code>.env</code> file in your project folder.</p>
     <input id="tokenInput" type="password" autocomplete="off" placeholder="paste token">
-    <div class="row"><button value="ok" class="primary">Save</button></div>
+    <label class="inline-check small"><input type="checkbox" id="tokenRemember"> Remember on this computer</label>
+    <div class="dialog-actions"><button value="ok" class="primary">Save</button></div>
+  </form>
+</dialog>
+
+<dialog id="addLeadDialog">
+  <form method="dialog" id="addLeadForm">
+    <h2>Add a business</h2>
+    <p class="small muted">It goes through the same checks as businesses the bot finds itself: profile check, fit, score and your approval.</p>
+    <label class="field"><span>Instagram username or profile link</span><input type="text" id="addLeadHandle" autocomplete="off" placeholder="@business.name"></label>
+    <label class="field"><span>Note (optional)</span><input type="text" id="addLeadNote" autocomplete="off" placeholder="e.g. met at the expo"></label>
+    <div class="dialog-actions"><button value="cancel" formnovalidate>Cancel</button><button value="ok" class="primary">Add</button></div>
+  </form>
+</dialog>
+
+<dialog id="goLiveDialog">
+  <form method="dialog" id="goLiveForm">
+    <h2>Switch to your real Instagram</h2>
+    <p class="small">The program restarts connected to Instagram as @<span id="goLiveAccount"></span>. It starts in <b>Observe</b> mode: it sends nothing until you switch to Approval and approve a message.</p>
+    <label class="field"><span>Test mode: while you test, only message these accounts</span>
+      <input type="text" id="goLiveTargets" autocomplete="off" placeholder="your_second_account">
+      <span class="help-text">Your own second account is ideal. Clear this later in Settings to message real businesses.</span>
+    </label>
+    <label class="inline-check"><input type="checkbox" id="goLiveNoSearch" checked> Don't look for new businesses yet (you add them by hand)</label>
+    <label class="inline-check"><input type="checkbox" id="goLiveShow" checked> Show the browser window while it works</label>
+    <div class="dialog-actions"><button value="cancel" formnovalidate>Cancel</button><button value="ok" class="primary">Switch and restart</button></div>
   </form>
 </dialog>
 
 <div class="toast" id="toast" role="status" hidden></div>
+<div class="tooltip" id="tooltip" role="tooltip" hidden></div>
 </body>
 </html>

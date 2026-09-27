@@ -282,6 +282,21 @@ class ReplyIntent(StrEnum):
     NEUTRAL = "NEUTRAL"
 
 
+class SalesStage(StrEnum):
+    """Where a conversation stands commercially. Set by Rohit in Mission Control;
+    an interested or questioning reply already counts as INTERESTED."""
+
+    INTERESTED = "INTERESTED"
+    MEETING = "MEETING"  # a call or visit is booked
+    PROPOSAL = "PROPOSAL"  # a price or proposal was sent
+    WON = "WON"  # became a client
+    LOST = "LOST"
+
+    @property
+    def still_interested(self) -> bool:
+        return self is not SalesStage.LOST
+
+
 class GateOutcome(StrEnum):
     ALLOW = "ALLOW"
     DENY = "DENY"  # permanent for this action: cancel it

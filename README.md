@@ -66,39 +66,26 @@ The demo runs the whole system in `AUTONOMOUS` mode against the simulated world:
 
 It narrates every event as it happens and ends with the commands to inspect the run. Examples: `insta-outreach --config data/demo/settings.yaml explain @sim.smileline.dental`, `audit`, `messages`, `incidents --all`.
 
-Day-to-day use:
+Day-to-day use: install once (`insta-outreach setup --service`), then double-click the *Mission Control* file it writes to the project folder (`Mission Control.cmd` on Windows). It starts the program and opens Mission Control, signed in. From a terminal: `insta-outreach run --open`.
 
-```bash
-.venv/bin/insta-outreach setup --service      # .env with a control token, config, database, Chromium, start-at-log-in service
-.venv/bin/insta-outreach run                  # orchestrator + Mission Control on http://127.0.0.1:8765
-.venv/bin/insta-outreach mode APPROVAL        # change the runtime mode
-.venv/bin/insta-outreach approvals            # review drafts; approve / reject --redraft
-```
+### Mission Control: every control on one site
 
-### Mission Control: see everything, live
+`http://127.0.0.1:8765` runs the whole system in plain English, refreshed every 1.5 seconds. After the first install, nothing needs the command line.
 
-`http://127.0.0.1:8765` is a live view of the whole system in plain English, refreshed every 1.5 seconds:
+- **Dashboard:** what the bot is doing right now; six numbers (found, good fit, messaged, replied, interested, clients) with the last 7 days; the funnel with conversion between steps; today's to-do list; the latest messages; account health and limits; the best prospects; recent activity; businesses by category; **Find businesses now**.
+- **Approvals:** each waiting message next to the business's score, facts and why it fits: edit, approve, reject & rewrite.
+- **Businesses:** search and filter every business, add one by hand, and set its **sales stage** (interested, meeting booked, proposal sent, client, not now).
+- **Chats:** every conversation, the ones waiting for your reply first; take over or hand back.
+- **Campaigns:** who to look for (kinds of business, places) and how (search, hashtags, similar accounts, location pages, followers of an account, post commenters).
+- **Analytics:** reply rate, interested and clients per 100 messaged, per-day charts, results by source and category.
+- **Activity and Problems:** the plain-English diary with the full technical history, and Instagram problems with their screenshots.
+- **Settings:** switch between the simulation and your real Instagram (with a test mode), **log in to Instagram** in a window you control, test the login, a research account, daily limits, hours, message details, **phone alerts** (Telegram), go-live checks, never-contact list, and the safety rules in force.
 
-- **Right now:** one sentence on what the bot is doing, today's sends against the limit, and why anything is waiting.
-- **Funnel:** Found → Good fit → Messaged → Replied → With you, with live counts.
-- **What's happening:** a plain-English diary of sends, replies, handoffs, new businesses found and Instagram problems. Tick *Technical details* to also see every search, profile check and inbox read.
-- **Limits, Instagram connections, problems** (with the checkpoint screenshot) and **go-live checks**.
-- **Controls:**
-  - approve, edit or reject messages;
-  - take over or hand back a conversation;
-  - never-contact;
-  - halt or resume a lane;
-  - switch mode;
-  - **Pause all**.
-
-  Every button goes through the same audited checks as the CLI.
-- **Any handle** opens its conversation and full decision trail.
-
-It works on a phone via Tailscale. Telegram alerts reach you for checkpoints and warm leads. See **[docs/DEPLOY.md](docs/DEPLOY.md)**.
+Every button goes through the same audited checks as the CLI, which still exists for scripts. Settings saved on the page are kept in `config/settings.dashboard.yaml`; `settings.yaml` is never rewritten. It works on a phone via Tailscale, and Telegram alerts reach you for checkpoints and warm leads. See **[docs/DEPLOY.md](docs/DEPLOY.md)**.
 
 ## Safeguards
 
-All of these are configurable, and can be overridden at runtime with `insta-outreach limits --set KEY=VALUE`:
+All of these are configurable. The daily limits can be changed at runtime on Mission Control's Settings page (or `insta-outreach limits --set KEY=VALUE`):
 
 | Safeguard | Default |
 |---|---|
@@ -110,25 +97,22 @@ All of these are configurable, and can be overridden at runtime with `insta-outr
 | Repeated contact | Never messages anyone with any earlier outbound message, or a thread with history. Branch accounts sharing a website, phone or email count as one business. |
 | Suppression | Opt-outs and "not interested" replies are suppressed permanently, by username, IGSID, domain, phone and email. |
 | Rate-limit signal | That lane cools down for 24 h; a second signal within 24 h halts it for a human. |
-| Checkpoint, login, restriction, captcha | The lane stops immediately and an incident opens with a screenshot and URL. **Never bypassed.** |
+| Checkpoint, login, restriction, captcha | The lane stops immediately and an incident opens with a screenshot and URL. **Never bypassed.** On the real account the browser is not used at all before your first login. |
 | UI drift | After 2 consecutive "can't find the element" failures the lane halts for review. |
 | Human activity | Any message Rohit sends himself pauses automation for that conversation until he releases it. |
-| Global kill switch | `insta-outreach pause on` |
+| Global kill switch | **Pause all** in Mission Control (`insta-outreach pause on`) |
 
 ## Going live (summary)
 
 Follow **[docs/LIVE_CHECKLIST.md](docs/LIVE_CHECKLIST.md)** step by step. It starts with a sandbox where only your own test account can receive messages. [docs/OPERATIONS.md](docs/OPERATIONS.md) is the day-to-day runbook.
 
-1. Set `environment: live` and put a `CONTROL_API_TOKEN` in `.env` (loaded automatically). In live mode the control plane refuses to work without one.
-2. **Browser lane:**
-   - set `browser.enabled: true`;
-   - run `insta-outreach browser login` and log in yourself, including any 2FA;
-   - run `insta-outreach browser probe --target <some business>` (read-only).
+1. Mission Control → Settings → **Switch to my real Instagram…** with test mode on (only your own test account can receive messages). It needs the `CONTROL_API_TOKEN` that `setup` put in `.env`; in live mode the control plane refuses to work without one.
+2. **Browser lane:** Settings → *Instagram accounts* → **Log in…** and log in yourself, including any 2FA, in the window that opens; then **Test login** (read-only).
 3. **API lane (optional, recommended):**
    - create a Meta app with Instagram Login;
    - set `IG_ACCESS_TOKEN`, `IG_USER_ID`, `IG_APP_SECRET` and `IG_WEBHOOK_VERIFY_TOKEN`;
    - subscribe the webhook fields `messages`, `message_echoes` and `comments` to `https://<host>/webhooks/instagram`.
-4. Start in `OBSERVE`, then `DRAFT`, then `APPROVAL` for a while. For the live account, **AUTONOMOUS is refused by code** until `insta-outreach preflight` passes. That requires:
+4. Start in `OBSERVE`, then `DRAFT`, then `APPROVAL` for a while. For the live account, **AUTONOMOUS is refused by code** until every go-live check passes (Settings → *Go-live checks*, or `insta-outreach preflight`). That requires:
    - the token;
    - an outbound lane;
    - a browser session verified within 7 days;

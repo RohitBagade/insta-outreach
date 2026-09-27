@@ -9,7 +9,8 @@ and a live feed that merges the audit trail with every executor attempt
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime, timedelta
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -25,7 +26,10 @@ from insta_outreach.domain.enums import (
     IncidentSeverity,
     IncidentStatus,
     LeadStatus,
+    MessageDirection,
+    SalesStage,
 )
+from insta_outreach.orchestrator.control import INTERESTED_INTENTS
 from insta_outreach.orchestrator.pipeline import Services
 from insta_outreach.policy import usage as u
 from insta_outreach.policy.lanes import LaneService
@@ -37,12 +41,28 @@ from insta_outreach.storage.models import (
     DiscoveryRun,
     Incident,
     Lead,
+    LeadSource,
+    LeadStage,
+    Message,
     Suppression,
 )
 from insta_outreach.util.clock import in_window, local_day_start, next_window_start
 
 _SEND_TYPES = (ActionType.SEND_OUTREACH, ActionType.SEND_FOLLOW_UP, ActionType.SEND_REPLY)
 _RETRY_STATUSES = (ExecutionStatus.RETRYABLE_FAILURE, ExecutionStatus.UI_CHANGED)
+# Checked and worth a message (whatever happened after).
+GOOD_FIT = frozenset(
+    {
+        LeadStatus.QUALIFIED,
+        LeadStatus.OUTREACH_PENDING,
+        LeadStatus.CONTACTED,
+        LeadStatus.REPLIED,
+        LeadStatus.HANDED_OFF,
+        LeadStatus.CLOSED,
+        LeadStatus.UNREACHABLE,
+    }
+)
+_OPEN_SENDS = (ActionStatus.PENDING_APPROVAL, ActionStatus.DRAFTED, ActionStatus.APPROVED, ActionStatus.EXECUTING)
 
 # Which workflow node an audit event belongs to (the dashboard pulses it).
 _NODE_BY_KIND = (
@@ -170,8 +190,36 @@ def plain_event(kind: str, subject: str, summary: str, detail: dict[str, Any]) -
     if kind == "suppression.removed":
         return f"{subject.split(':', 1)[-1]} was removed from the never-contact list", True
     if kind == "browser.session_verified":
-        return "Checked the Instagram login: it works", True
+        research = channel_key == "RESEARCH"
+        if detail.get("via") == "login":
+            return ("Logged in to the research account" if research else "Logged in to Instagram"), True
+        return f"Checked {'the research account' if research else 'the Instagram'} login: it works", True
+    if kind == "settings.changed":
+        labels = [str(label) for label in detail.get("labels") or []]
+        later = " (after a restart)" if detail.get("restart_required") else ""
+        return "You changed settings: " + (", ".join(labels) or "settings") + later, True
+    if kind == "alerts.changed":
+        return "Phone alerts were set up", True
+    if kind == "discovery.requested":
+        planned = int(detail.get("planned") or 0)
+        return "You asked it to look for new businesses now" + (
+            f" ({planned} search{'es' if planned != 1 else ''} queued)" if planned else " (nothing new to search yet)"
+        ), True
+    if kind == "lead.stage":
+        stage = str(detail.get("stage") or "")
+        return (
+            f"You marked {who}: {_STAGE_WORDS.get(stage, stage.lower())}" if stage else f"You cleared {who}'s stage"
+        ), True
     return summary, False  # incidents mirror lane events; blocks, cancellations: technical
+
+
+_STAGE_WORDS = {
+    "INTERESTED": "interested",
+    "MEETING": "meeting booked",
+    "PROPOSAL": "proposal sent",
+    "WON": "client",
+    "LOST": "not now",
+}
 
 
 def _node_for(kind: str) -> str | None:
@@ -194,13 +242,14 @@ class MonitorService:
         self._lanes = lanes
         self._ledger = ledger
         self._account = services.settings.account.id
+        self.started = datetime.now(UTC).isoformat()  # tells the page when the program restarted
 
     # ------------------------------------------------------------------ helpers
     @property
     def _tz(self) -> str:
         return self.s.settings.schedule.timezone
 
-    def _local(self, value: datetime | None) -> str | None:
+    def local(self, value: datetime | None) -> str | None:
         if value is None:
             return None
         local = value.astimezone(ZoneInfo(self._tz))
@@ -217,9 +266,11 @@ class MonitorService:
                     "channel": lane.channel.value,
                     "state": lane.state.value,
                     "until": lane.until.isoformat() if lane.until else None,
-                    "until_local": self._local(lane.until),
+                    "until_local": self.local(lane.until),
                     "reason": lane.reason,
                     "configured": lane.channel in self.s.executor.adapters,
+                    "needs_login": lane.channel in self.s.executor.adapters
+                    and settings.first_login_pending(lane.channel),
                 }
                 for lane in self._lanes.all_snapshots(session, self._account, self.s.executor.adapters)
             ]
@@ -302,7 +353,7 @@ class MonitorService:
             "mode": self.s.runtime.mode().value,
             "paused": self.s.runtime.paused(),
             "now": now.isoformat(),
-            "now_local": self._local(now),
+            "now_local": self.local(now),
             "timezone": self._tz,
             "lanes": lanes,
             "pipeline": {
@@ -325,7 +376,7 @@ class MonitorService:
                     "parked": count(None, ActionStatus.NEEDS_HUMAN),
                     "executing": count(None, ActionStatus.EXECUTING),
                     "waiting_for": [{"reason": r, "count": n} for r, n in waits.most_common(3)],
-                    "next_attempt_local": self._local(earliest),
+                    "next_attempt_local": self.local(earliest),
                 },
                 "send": {
                     "sent_today": sum(sent_today.values()),
@@ -363,6 +414,7 @@ class MonitorService:
                 "human_owned": human_owned or 0,
             },
             "cursor": cursor,
+            "started": self.started,
         }
 
     # -------------------------------------------------------------------- usage
@@ -394,13 +446,13 @@ class MonitorService:
             }
         earliest = last_send + timedelta(seconds=limits.min_seconds_between_sends) if last_send else None
         data |= {
-            "last_send_local": self._local(last_send),
-            "next_send_earliest_local": self._local(earliest) if earliest and earliest > now else None,
+            "last_send_local": self.local(last_send),
+            "next_send_earliest_local": self.local(earliest) if earliest and earliest > now else None,
             "min_seconds_between_sends": limits.min_seconds_between_sends,
             "send_jitter_seconds": limits.send_jitter_seconds,
             "send_hours": "-".join(schedule.send_hours),
             "in_send_hours": in_window(now, self._tz, schedule.send_hours),
-            "next_send_window_local": self._local(next_window_start(now, self._tz, schedule.send_hours)),
+            "next_send_window_local": self.local(next_window_start(now, self._tz, schedule.send_hours)),
             "browser_hours": "-".join(schedule.browser_active_hours),
             "in_browser_hours": in_window(now, self._tz, schedule.browser_active_hours),
         }
@@ -454,7 +506,7 @@ class MonitorService:
             "source": "audit",
             "id": e.id,
             "at": e.at.isoformat(),
-            "at_local": self._local(e.at),
+            "at_local": self.local(e.at),
             "kind": e.kind,
             "actor": e.actor,
             "subject": subject,
@@ -502,7 +554,7 @@ class MonitorService:
             "source": "exec",
             "id": t.id,
             "at": t.finished_at.isoformat(),
-            "at_local": self._local(t.finished_at),
+            "at_local": self.local(t.finished_at),
             "kind": f"exec.{a.type.value.lower()}",
             "actor": channel,
             "subject": f"@{a.target_username}" if a.target_username else "",
@@ -513,3 +565,252 @@ class MonitorService:
             "tone": tone,
             "node": node,
         }
+
+    # ---------------------------------------------------------------- dashboard
+    def dashboard(self) -> dict[str, Any]:
+        """The home page: totals with the last 7 days, the latest messages, the best
+        prospects, businesses by category, and chats waiting on Rohit."""
+        now = self.s.clock.now()
+        week_ago = now - timedelta(days=7)
+        with self.s.db.session() as session:
+            facts = _Facts.load(session)
+            latest = session.execute(
+                select(Action, Lead)
+                .outerjoin(Lead, Lead.id == Action.lead_id)
+                .where(Action.type.in_(_SEND_TYPES), Action.status != ActionStatus.PROPOSED)
+                .order_by(func.coalesce(Action.completed_at, Action.created_at).desc(), Action.id)
+                .limit(12)
+            ).all()
+            top_leads = session.scalars(
+                select(Lead)
+                .where(Lead.status.in_([LeadStatus.QUALIFIED, LeadStatus.OUTREACH_PENDING]))
+                .order_by(Lead.score.desc().nulls_last(), Lead.id)
+                .limit(6)
+            ).all()
+            open_actions = {
+                a.lead_id: a
+                for a in session.scalars(
+                    select(Action)
+                    .where(
+                        Action.lead_id.in_([lead.id for lead in top_leads]),
+                        Action.type == ActionType.SEND_OUTREACH,
+                        Action.status.in_(_OPEN_SENDS),
+                    )
+                    .order_by(Action.created_at)
+                )
+            }
+            awaiting = self._awaiting_you(session)
+
+        def kpi(times: list[datetime | None]) -> dict[str, int]:
+            present = [t for t in times if t is not None]
+            return {"total": len(present), "week": sum(1 for t in present if t >= week_ago)}
+
+        leads = facts.leads
+        return {
+            "kpis": {
+                "found": kpi([row.created_at for row in leads]),
+                "good_fit": kpi([row.analyzed_at or row.created_at for row in leads if row.status in GOOD_FIT]),
+                "messaged": kpi([row.contacted_at for row in leads]),
+                "replied": kpi([row.replied_at for row in leads]),
+                "interested": kpi(list(facts.interested().values())),
+                "clients": kpi(list(facts.clients().values())),
+            },
+            "latest": [self._message_item(action, lead) for action, lead in latest],
+            "top": [
+                {
+                    "handle": lead.username,
+                    "full_name": lead.full_name,
+                    "score": lead.score,
+                    "niche": lead.niche,
+                    "location": lead.location_match,
+                    "followers": lead.followers,
+                    "why": lead.status_reason,
+                    "opportunities": [o.get("type") for o in lead.opportunities or [] if isinstance(o, dict)],
+                    "action_id": open_actions[lead.id].id if lead.id in open_actions else None,
+                    "action_status": open_actions[lead.id].status.value if lead.id in open_actions else None,
+                    "message": open_actions[lead.id].message_text if lead.id in open_actions else None,
+                }
+                for lead in top_leads
+            ],
+            "categories": facts.breakdown(lambda row: row.niche or "other"),
+            "awaiting_you": awaiting,
+        }
+
+    def _message_item(self, action: Action, lead: Lead | None) -> dict[str, Any]:
+        kind = {
+            ActionType.SEND_OUTREACH: "first message",
+            ActionType.SEND_FOLLOW_UP: "follow-up",
+            ActionType.SEND_REPLY: "reply",
+        }[action.type]
+        if action.capability is Capability.PRIVATE_REPLY:
+            kind = "private reply"
+        return {
+            "id": action.id,
+            "handle": action.target_username,
+            "kind": kind,
+            "status": action.status.value,
+            "at_local": self.local(action.completed_at or action.created_at),
+            "preview": _clip(action.message_text, 160),
+            "score": lead.score if lead else None,
+            "niche": lead.niche if lead else None,
+        }
+
+    @staticmethod
+    def _awaiting_you(session: Any) -> int:
+        """Chats Rohit owns where the prospect wrote last."""
+        paused = select(Conversation.id).where(Conversation.automation_paused.is_(True))
+        last_ids = session.scalars(
+            select(func.max(Message.id)).where(Message.conversation_id.in_(paused)).group_by(Message.conversation_id)
+        ).all()
+        return int(
+            session.scalar(
+                select(func.count())
+                .select_from(Message)
+                .where(Message.id.in_(last_ids), Message.direction == MessageDirection.INBOUND)
+            )
+            or 0
+        )
+
+    # ---------------------------------------------------------------- analytics
+    def analytics(self, days: int = 14) -> dict[str, Any]:
+        days = max(7, min(days, 90))
+        now = self.s.clock.now()
+        zone = ZoneInfo(self._tz)
+        today = now.astimezone(zone).date()
+        dates = [today - timedelta(days=n) for n in range(days - 1, -1, -1)]
+        start = datetime.combine(dates[0], time(0), tzinfo=zone)
+        with self.s.db.session() as session:
+            facts = _Facts.load(session)
+            followups = session.scalars(
+                select(Action.completed_at).where(
+                    Action.type == ActionType.SEND_FOLLOW_UP,
+                    Action.status == ActionStatus.SUCCEEDED,
+                    Action.completed_at >= start,
+                )
+            ).all()
+            source: dict[int, str] = {}
+            for lead_id, strategy in session.execute(
+                select(LeadSource.lead_id, LeadSource.strategy).order_by(LeadSource.discovered_at, LeadSource.id)
+            ):
+                source.setdefault(lead_id, strategy)
+
+        def per_day(times: list[datetime | None]) -> dict[date, int]:
+            counts: Counter[date] = Counter()
+            for t in times:
+                if t is not None and t >= start:
+                    counts[t.astimezone(zone).date()] += 1
+            return counts
+
+        leads = facts.leads
+        interested, clients = facts.interested(), facts.clients()
+        series = {
+            "found": per_day([row.created_at for row in leads]),
+            "messaged": per_day([row.contacted_at for row in leads]),
+            "followups": per_day(list(followups)),
+            "replied": per_day([row.replied_at for row in leads]),
+            "interested": per_day(list(interested.values())),
+        }
+        funnel = {
+            "found": len(leads),
+            "good_fit": sum(1 for row in leads if row.status in GOOD_FIT),
+            "messaged": sum(1 for row in leads if row.contacted_at),
+            "replied": sum(1 for row in leads if row.replied_at),
+            "interested": len(interested),
+            "clients": len(clients),
+        }
+
+        def rate(part: int, whole: int, scale: int = 1) -> float | None:
+            return round(part * scale / whole, 3) if whole else None
+
+        return {
+            "days": [
+                {"date": d.isoformat(), "label": f"{d.day} {d.strftime('%b')}"}
+                | {k: v.get(d, 0) for k, v in series.items()}
+                for d in dates
+            ],
+            "funnel": [{"stage": stage, "count": count} for stage, count in funnel.items()],
+            "rates": {
+                "good_fit": rate(funnel["good_fit"], funnel["found"]),
+                "reply": rate(funnel["replied"], funnel["messaged"]),
+                "interested_per_100": rate(funnel["interested"], funnel["messaged"], 100),
+                "clients_per_100": rate(funnel["clients"], funnel["messaged"], 100),
+            },
+            "by_niche": facts.breakdown(lambda row: row.niche or "other"),
+            "by_source": facts.breakdown(lambda row: source.get(row.id, "unknown")),
+            "timezone": self._tz,
+        }
+
+
+@dataclass(frozen=True)
+class _LeadRow:
+    id: int
+    niche: str | None
+    status: LeadStatus
+    created_at: datetime
+    analyzed_at: datetime | None
+    contacted_at: datetime | None
+    replied_at: datetime | None
+
+
+@dataclass
+class _Facts:
+    """Every lead's funnel timestamps, plus interest and sales stages, in one read."""
+
+    leads: list[_LeadRow]
+    stages: dict[int, tuple[SalesStage, datetime]]
+    interested_replies: dict[int, datetime]  # lead id -> first interested/question reply
+
+    @classmethod
+    def load(cls, session: Any) -> _Facts:
+        leads = [
+            _LeadRow(*row)
+            for row in session.execute(
+                select(
+                    Lead.id,
+                    Lead.niche,
+                    Lead.status,
+                    Lead.created_at,
+                    Lead.analyzed_at,
+                    Lead.contacted_at,
+                    Lead.replied_at,
+                )
+            )
+        ]
+        stages = {row.lead_id: (row.stage, row.updated_at) for row in session.scalars(select(LeadStage))}
+        replies = dict(
+            session.execute(
+                select(Conversation.lead_id, func.min(Message.created_at))
+                .join(Message, Message.conversation_id == Conversation.id)
+                .where(
+                    Message.direction == MessageDirection.INBOUND,
+                    Message.intent.in_(INTERESTED_INTENTS),
+                    Conversation.lead_id.is_not(None),
+                )
+                .group_by(Conversation.lead_id)
+            ).all()
+        )
+        return cls(leads, stages, replies)
+
+    def interested(self) -> dict[int, datetime]:
+        """Leads interested now (a stage Rohit set that isn't LOST, else an interested reply), with since when."""
+        found = {lead_id: at for lead_id, at in self.interested_replies.items() if lead_id not in self.stages}
+        found |= {lead_id: at for lead_id, (stage, at) in self.stages.items() if stage.still_interested}
+        return found
+
+    def clients(self) -> dict[int, datetime]:
+        return {lead_id: at for lead_id, (stage, at) in self.stages.items() if stage is SalesStage.WON}
+
+    def breakdown(self, key: Any) -> list[dict[str, Any]]:
+        interested = self.interested()
+        groups: dict[str, dict[str, Any]] = {}
+        for row in self.leads:
+            name = str(key(row))
+            group = groups.setdefault(
+                name, {"name": name, "found": 0, "good_fit": 0, "messaged": 0, "replied": 0, "interested": 0}
+            )
+            group["found"] += 1
+            group["good_fit"] += row.status in GOOD_FIT
+            group["messaged"] += row.contacted_at is not None
+            group["replied"] += row.replied_at is not None
+            group["interested"] += row.id in interested
+        return sorted(groups.values(), key=lambda g: (-g["found"], g["name"]))

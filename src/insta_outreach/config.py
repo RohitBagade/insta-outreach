@@ -5,7 +5,12 @@ system runs (operating mode, limit overrides) live in the database and are
 read through :class:`insta_outreach.runtime.RuntimeControl`, so switching
 OBSERVE -> AUTONOMOUS never needs a restart or a different code path.
 
-Environment overrides:
+Settings changed on Mission Control's Settings page are written to a small
+file next to settings.yaml (``settings.dashboard.yaml``, see
+:mod:`insta_outreach.editable_settings`) and applied on top of it, so the
+hand-written settings.yaml and its comments are never rewritten.
+
+Environment overrides (they win over both files):
   * ``INSTA_OUTREACH_CONFIG``   path of the YAML file (default config/settings.yaml)
   * ``IG_ACCESS_TOKEN``, ``IG_APP_SECRET``, ``IG_WEBHOOK_VERIFY_TOKEN``,
     ``CONTROL_API_TOKEN``, ``NOTIFY_WEBHOOK_URL``, ``TELEGRAM_BOT_TOKEN``,
@@ -21,9 +26,9 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, SecretStr, field_validator
+from pydantic import BaseModel, Field, PrivateAttr, SecretStr, field_validator
 
-from insta_outreach.domain.enums import Environment, IncidentSeverity, OperatingMode
+from insta_outreach.domain.enums import Channel, Environment, IncidentSeverity, OperatingMode
 
 Effort = Literal["low", "medium", "high", "xhigh", "max"]
 
@@ -429,6 +434,28 @@ class Settings(BaseModel):
     retention: RetentionSettings = Field(default_factory=RetentionSettings)
     rollout: RolloutSettings = Field(default_factory=RolloutSettings)
     simulation: SimulationSettings = Field(default_factory=SimulationSettings)
+    # The settings file these were loaded from (None when built in code, e.g. the demo).
+    _config_path: Path | None = PrivateAttr(default=None)
+
+    @property
+    def config_path(self) -> Path | None:
+        return self._config_path
+
+    def browser_account(self, channel: Channel) -> AccountSettings:
+        """Which of our Instagram accounts a browser lane uses."""
+        return self.research.account if channel is Channel.RESEARCH else self.account
+
+    def browser_profile(self, channel: Channel) -> Path:
+        return Path(self.browser.profiles_dir) / self.browser_account(channel).id
+
+    def first_login_pending(self, channel: Channel) -> bool:
+        """LIVE: nobody has logged in to this browser account on this computer yet
+        (no saved browser profile). The bot leaves such an account alone: it would
+        only find Instagram's login page. Log in from Mission Control first."""
+        if self.environment is not Environment.LIVE or not channel.is_browser:
+            return False
+        profile = self.browser_profile(channel)
+        return not (profile.is_dir() and any(profile.iterdir()))
 
     @property
     def resolved_database_url(self) -> str:
@@ -504,15 +531,49 @@ def default_config_path() -> Path:
     return Path(os.environ.get("INSTA_OUTREACH_CONFIG", "config/settings.yaml"))
 
 
+def overlay_path(config_path: Path) -> Path:
+    """Where Mission Control keeps the settings changed on its Settings page."""
+    return config_path.with_name(f"{config_path.stem}.dashboard.yaml")
+
+
+def _read_mapping(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if loaded is not None and not isinstance(loaded, dict):
+        raise ValueError(f"{path}: top level must be a mapping")
+    return loaded or {}
+
+
+def read_overlay(config_path: Path) -> dict[str, Any]:
+    return _read_mapping(overlay_path(config_path))
+
+
+def deep_merge(base: dict[str, Any], extra: dict[str, Any]) -> dict[str, Any]:
+    """``extra`` wins; mappings merge key by key, lists and values are replaced."""
+    merged = dict(base)
+    for key, value in extra.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def compose_settings(
+    config_path: Path, environ: dict[str, str] | None = None, overlay: dict[str, Any] | None = None
+) -> Settings:
+    """settings.yaml, then the Mission Control overlay (``overlay`` replaces the
+    file's content when given), then environment variables."""
+    data = deep_merge(_read_mapping(config_path), read_overlay(config_path) if overlay is None else overlay)
+    settings = Settings.model_validate(apply_env_overrides(data, environ))
+    settings._config_path = config_path
+    return settings
+
+
 def load_settings(path: Path | str | None = None, environ: dict[str, str] | None = None) -> Settings:
     config_path = Path(path) if path else default_config_path()
     if path and not config_path.exists():
         # An explicit path that does not exist is a typo, not "use the defaults".
         raise FileNotFoundError(f"config file not found: {config_path}")
-    data: dict[str, Any] = {}
-    if config_path.exists():
-        loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-        if loaded is not None and not isinstance(loaded, dict):
-            raise ValueError(f"{config_path}: top level must be a mapping")
-        data = loaded or {}
-    return Settings.model_validate(apply_env_overrides(data, environ))
+    return compose_settings(config_path, environ)
