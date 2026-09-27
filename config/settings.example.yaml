@@ -15,6 +15,15 @@ account:
   id: lemmedeliver
   username: lemmedeliver
 
+# Optional second Instagram account that does all searching and profile reading in its own browser
+# session, so @lemmedeliver only sends and reads its own chats. A checkpoint on one never stops the other.
+# Log it in once with `insta-outreach browser login --account research`.
+research:
+  enabled: false
+  account:
+    id: research
+    username: ""               # the second account's username, without @
+
 # --- Tier 1: official Meta APIs (see docs/RESEARCH.md for what each login type can do) ---
 api:
   enabled: false

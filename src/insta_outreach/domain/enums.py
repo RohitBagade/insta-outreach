@@ -34,10 +34,20 @@ class OperatingMode(StrEnum):
 
 
 class Channel(StrEnum):
-    """An execution lane technology. Lanes are (account, channel) pairs."""
+    """An execution lane technology. Lanes are (account, channel) pairs.
+
+    RESEARCH is a browser session logged in as a *separate* Instagram account
+    that only searches and reads public profiles, so the brand account's
+    BROWSER lane is used for nothing but its own conversations.
+    """
 
     API = "API"
     BROWSER = "BROWSER"
+    RESEARCH = "RESEARCH"
+
+    @property
+    def is_browser(self) -> bool:
+        return self is not Channel.API
 
 
 class ExecutionStatus(StrEnum):

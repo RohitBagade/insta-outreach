@@ -12,7 +12,8 @@ from insta_outreach.conversations.ownership import OwnershipService
 from insta_outreach.domain.enums import Channel, Environment
 from insta_outreach.domain.models import InboundEvent
 from insta_outreach.execution.base import InstagramAdapter
-from insta_outreach.execution.executor import InstagramExecutor
+from insta_outreach.execution.executor import DEFAULT_ROUTES, InstagramExecutor
+from insta_outreach.execution.research import ResearchAdapter, research_routes
 from insta_outreach.execution.simulator import (
     SimulatedApiAdapter,
     SimulatedBrowserAdapter,
@@ -105,6 +106,11 @@ def _live_adapters(
         from insta_outreach.execution.browser.adapter import PlaywrightBrowserAdapter
 
         adapters[Channel.BROWSER] = PlaywrightBrowserAdapter(settings.browser, settings.account, clock, llm, db)
+        if settings.research.enabled:
+            if not settings.research.account.username:
+                raise ValueError("research.enabled needs research.account.username (the second Instagram account)")
+            research = PlaywrightBrowserAdapter(settings.browser, settings.research.account, clock, llm, db)
+            adapters[Channel.RESEARCH] = ResearchAdapter(research)
     if not adapters:
         log.warning(
             "LIVE environment with no adapters configured: nothing will be executed "
@@ -147,6 +153,8 @@ def build_app(
                 Channel.API: SimulatedApiAdapter(world, business_discovery=settings.simulation.api_business_discovery),
                 Channel.BROWSER: SimulatedBrowserAdapter(world),
             }
+            if settings.research.enabled:
+                adapters[Channel.RESEARCH] = ResearchAdapter(SimulatedBrowserAdapter(world))
         website_checker = website_checker or SimulatedWebsiteChecker(world)
         sim_world = world
 
@@ -177,6 +185,7 @@ def build_app(
         ledger=ledger,
         limits=runtime.limits,
         evidence_dir=settings.browser.evidence_dir,
+        routes=research_routes(DEFAULT_ROUTES) if Channel.RESEARCH in adapters else DEFAULT_ROUTES,
         rng=rng,
     )
     services = Services(

@@ -201,7 +201,7 @@ def evaluate(f: GateFacts) -> GateDecision:
         else:
             reasons = [f"lane {lane.channel.value} halted: {lane.reason}" for lane in f.lanes]
             return GateDecision(GateOutcome.DEFER, reasons, lane_parked=True)
-    elif all(lane.channel is Channel.BROWSER for lane in open_lanes):
+    elif all(lane.channel.is_browser for lane in open_lanes):
         if not in_window(f.now, tz, f.schedule.browser_active_hours):
             defer.append(
                 (next_window_start(f.now, tz, f.schedule.browser_active_hours), "outside browser active hours")
@@ -267,6 +267,8 @@ class EligibilityGate:
             action.params = params
 
         in_flight = self._in_flight(session, account, action)
+        # The browser lane that would serve this action: the research account's for research work.
+        browser = next((ch for ch in channels if ch.is_browser), Channel.BROWSER)
         facts = GateFacts(
             now=now,
             mode=mode,
@@ -290,8 +292,8 @@ class EligibilityGate:
             + in_flight.get(ActionType.SEND_REPLY, 0),
             oldest_reply_in_hour=ledger.oldest_since(session, account, [u.SEND_REPLY], hour_ago),
             last_send_at=ledger.last_at(session, account, u.SEND_KINDS),
-            browser_units_last_hour=ledger.total(session, account, [u.PAGE_VIEW], hour_ago, Channel.BROWSER),
-            oldest_browser_unit_in_hour=ledger.oldest_since(session, account, [u.PAGE_VIEW], hour_ago, Channel.BROWSER),
+            browser_units_last_hour=ledger.total(session, account, [u.PAGE_VIEW], hour_ago, browser),
+            oldest_browser_unit_in_hour=ledger.oldest_since(session, account, [u.PAGE_VIEW], hour_ago, browser),
             inspections_today=ledger.total(session, account, [u.INSPECTION], day_start),
             discovery_runs_today=ledger.total(session, account, [u.DISCOVERY_RUN], day_start),
             send_jitter_seconds=float(params.get("_send_jitter", 0.0)),

@@ -172,7 +172,7 @@ class ControlService:
                     "until": _iso(lane.until),
                     "reason": lane.reason,
                 }
-                for lane in self._lanes.all_snapshots(session, self._account)
+                for lane in self._lanes.all_snapshots(session, self._account, self.s.executor.adapters)
             ]
             lead_counts = dict(session.execute(select(Lead.status, func.count()).group_by(Lead.status)).all())
             action_counts = dict(session.execute(select(Action.status, func.count()).group_by(Action.status)).all())

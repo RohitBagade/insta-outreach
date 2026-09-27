@@ -127,6 +127,7 @@ class SimComment:
 class FaultPlan:
     login_expired: bool = False
     checkpoint_after_browser_ops: int | None = None
+    checkpoint_channel: Channel | None = None  # only this browser lane hits the checkpoint (None: any)
     rate_limit_after_sends: int | None = None
     restricted_after_sends: int | None = None
     ui_changed: set[Capability] = field(default_factory=set)
@@ -637,7 +638,11 @@ class SimulatedBrowserAdapter(_SimAdapterBase):
                 code="login_page",
                 page_url="https://www.instagram.com/accounts/login/",
             )
-        if faults.checkpoint_after_browser_ops is not None and world.browser_ops > faults.checkpoint_after_browser_ops:
+        if (
+            faults.checkpoint_after_browser_ops is not None
+            and world.browser_ops > faults.checkpoint_after_browser_ops
+            and faults.checkpoint_channel in (None, self.channel)
+        ):
             return self._r(
                 request,
                 ExecutionStatus.CHECKPOINT_REQUIRED,

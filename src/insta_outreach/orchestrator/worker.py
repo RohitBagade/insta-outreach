@@ -174,13 +174,12 @@ class ExecutionWorker:
                     action.not_before = decision.not_before
                 action.status_reason = "; ".join(decision.reasons)[:1000]
                 return None
-            browser_left = limits.browser_units_per_hour - self._ledger.total(
-                session, action.account_id, [u.PAGE_VIEW], now - timedelta(hours=1), Channel.BROWSER
-            )
-            budgets = {
-                Channel.BROWSER: max(1, min(limits.max_units_per_operation, browser_left)),
-                Channel.API: limits.max_units_per_operation,
-            }
+            budgets = {Channel.API: limits.max_units_per_operation}
+            for channel in (Channel.BROWSER, Channel.RESEARCH):  # each account has its own page-view budget
+                left = limits.browser_units_per_hour - self._ledger.total(
+                    session, action.account_id, [u.PAGE_VIEW], now - timedelta(hours=1), channel
+                )
+                budgets[channel] = max(1, min(limits.max_units_per_operation, left))
             request = self._build_request(session, action, limits)
             prepared = Prepared(action.id, action.type, request, action.conversation_id, action.message_text, budgets)
             if not self.s.actions.claim(session, action.id, self.worker_id, LEASE_SECONDS):

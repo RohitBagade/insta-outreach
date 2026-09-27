@@ -428,12 +428,12 @@ def cmd_serve(args: argparse.Namespace) -> int:
 def cmd_browser(args: argparse.Namespace) -> int:
     from insta_outreach.execution.browser.tools import interactive_login, probe
 
-    settings = load_settings(args.config)
+    settings, channel = _browser_account(load_settings(args.config), args.account)
     if args.browser_action == "login":
         ok, message = asyncio.run(interactive_login(settings))
         print(message)
         if ok:
-            _runtime(settings).record_browser_session("login", by="cli", detail=message)
+            _runtime(settings).record_browser_session("login", by="cli", detail=message, channel=channel)
         return 0 if ok else 1
     from insta_outreach.llm import AnthropicLLM
     from insta_outreach.storage.db import Database
@@ -452,8 +452,19 @@ def cmd_browser(args: argparse.Namespace) -> int:
     _print(report)
     session_ok = report.get("session", {}).get("state") == "ok"
     if session_ok:
-        _runtime(settings).record_browser_session("probe", by="cli", detail=str(report["session"].get("url")))
+        detail = str(report["session"].get("url"))
+        _runtime(settings).record_browser_session("probe", by="cli", detail=detail, channel=channel)
     return 0 if session_ok else 1
+
+
+def _browser_account(settings: Settings, which: str) -> tuple[Settings, Channel]:
+    """The settings for one of our Instagram accounts: the brand account or the research account."""
+    if which != "research":
+        return settings, Channel.BROWSER
+    research = settings.research
+    if not (research.enabled and research.account.username):
+        raise ControlError("set research.enabled: true and research.account.username in config/settings.yaml first")
+    return settings.model_copy(update={"account": research.account}), Channel.RESEARCH
 
 
 def _runtime(settings: Settings) -> Any:
@@ -708,7 +719,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(fn=cmd_incidents)
     p = sub.add_parser("lane", help="resume or halt an execution lane")
     p.add_argument("lane_action", choices=["resume", "halt"])
-    p.add_argument("channel", choices=["api", "browser", "API", "BROWSER"])
+    p.add_argument("channel", choices=["api", "browser", "research", "API", "BROWSER", "RESEARCH"])
     p.add_argument("--note", default="")
     p.set_defaults(fn=cmd_lane)
     p = sub.add_parser("conversations", help="conversations and who owns them (human takeover)")
@@ -738,6 +749,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("browser_action", choices=["login", "probe"])
     p.add_argument("--target", help="probe: a profile to inspect read-only")
     p.add_argument("--query", help="probe: a search query to run read-only")
+    p.add_argument(
+        "--account",
+        choices=["brand", "research"],
+        default="brand",
+        help="which Instagram account: brand (@lemmedeliver, sends) or research (searches and reads profiles)",
+    )
     p.set_defaults(fn=cmd_browser)
     p = sub.add_parser("alerts", help="phone/webhook alerts: send a test, or find your Telegram chat id")
     p.add_argument("alerts_action", choices=["test", "find-chat"])

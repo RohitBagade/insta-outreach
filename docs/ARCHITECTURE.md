@@ -124,6 +124,10 @@ Every executor call is also stored as an `ActionAttempt`.
 | `SEND_DM_REPLY` | API (inside the 24 h window) → browser |
 | `PRIVATE_REPLY`, `REPLY_COMMENT` | API only |
 
+- **Research account (optional, `research.enabled`).** When configured, every research capability is moved from `BROWSER` to a separate `RESEARCH` lane, by `research_routes(DEFAULT_ROUTES)`. The research capabilities are the searches above plus `INSPECT_PROFILE`.
+  - The RESEARCH lane is a browser session logged in as a second Instagram account, with its own profile directory, page-view budget and stop state.
+  - `ResearchAdapter` refuses every other capability, so the research account can never send, or read @lemmedeliver's chats.
+  - There is deliberately no fallback to `BROWSER`: when the research lane stops, finding leads pauses while the brand account keeps sending, and vice versa.
 - Routes are data (`DEFAULT_ROUTES`). An adapter's `supports(request)` decides whether it can serve a given request right now: for example the 24 h window, or the 7-day private-reply window.
 - **Fallback** to the next channel is allowed:
   - for reads, after any non-barrier failure;

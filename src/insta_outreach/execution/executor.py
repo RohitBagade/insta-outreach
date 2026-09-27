@@ -79,8 +79,9 @@ class InstagramExecutor:
         self._routes = routes or DEFAULT_ROUTES
         self._rng = rng or random.Random()
         initial = limits()
-        self._semaphores = {
+        self._semaphores = {  # one browser per account: the brand account's and the research account's
             Channel.BROWSER: asyncio.Semaphore(max(1, initial.max_concurrent_browser_sessions)),
+            Channel.RESEARCH: asyncio.Semaphore(max(1, initial.max_concurrent_browser_sessions)),
             Channel.API: asyncio.Semaphore(max(1, initial.max_concurrent_api_calls)),
         }
         self._last_unit: dict[tuple[str, Channel], datetime | None] = {}
@@ -110,9 +111,9 @@ class InstagramExecutor:
         key = (request.account_id, channel)
         if key not in self._last_unit:
             with self._db.session() as session:
-                kind = PAGE_VIEW if channel is Channel.BROWSER else API_CALL
+                kind = PAGE_VIEW if channel.is_browser else API_CALL
                 self._last_unit[key] = self._ledger.last_at(session, request.account_id, [kind], channel)
-        if channel is Channel.BROWSER:
+        if channel.is_browser:
             interval, jitter, kind = (
                 limits.min_seconds_between_browser_units,
                 limits.browser_unit_jitter_seconds,

@@ -93,20 +93,15 @@ def live_readiness(services: Services, lanes: LaneService) -> list[Check]:
             True,
         )
     )
+    max_age = timedelta(days=rollout.browser_session_max_age_days)
     if browser_on:
-        profile = Path(settings.browser.profiles_dir) / settings.account.id
-        has_profile = profile.is_dir() and any(profile.iterdir())
-        verified_at = _browser_verified_at(services)
-        max_age = timedelta(days=rollout.browser_session_max_age_days)
-        fresh = verified_at is not None and now - verified_at <= max_age
-        detail = (f"session verified {verified_at.isoformat()}" if verified_at else "never verified") + (
-            "" if has_profile else f"; no browser profile at {profile}"
-        )
-        if not (fresh and has_profile):
-            detail += " -> run `insta-outreach browser login`, then `insta-outreach browser probe`"
-        checks.append(Check("browser_session", fresh and has_profile, detail, True))
+        checks.append(_session_check("browser_session", services, Channel.BROWSER, settings.account.id, now, max_age))
     else:
         checks.append(Check("browser_session", True, "browser lane disabled (first DMs need it)", False))
+    if Channel.RESEARCH in adapters:  # finding leads stops without it; sending does not need it
+        account_id = settings.research.account.id
+        research = _session_check("research_session", services, Channel.RESEARCH, account_id, now, max_age)
+        checks.append(Check(research.name, research.ok, research.detail, False))
     if settings.api.enabled:
         checks.append(
             Check(
@@ -200,13 +195,30 @@ def blocking(checks: list[Check]) -> list[Check]:
     return [c for c in checks if c.required and not c.ok]
 
 
-def _browser_verified_at(services: Services) -> datetime | None:
-    marker = services.runtime.browser_session().get("verified_at")
+def _session_check(
+    name: str, services: Services, channel: Channel, account_id: str, now: datetime, max_age: timedelta
+) -> Check:
+    """A logged-in browser profile, verified recently, for one Instagram account."""
+    profile = Path(services.settings.browser.profiles_dir) / account_id
+    has_profile = profile.is_dir() and any(profile.iterdir())
+    verified_at = _browser_verified_at(services, channel)
+    fresh = verified_at is not None and now - verified_at <= max_age
+    detail = (f"session verified {verified_at.isoformat()}" if verified_at else "never verified") + (
+        "" if has_profile else f"; no browser profile at {profile}"
+    )
+    if not (fresh and has_profile):
+        flag = " --account research" if channel is Channel.RESEARCH else ""
+        detail += f" -> run `insta-outreach browser login{flag}`, then `insta-outreach browser probe{flag}`"
+    return Check(name, fresh and has_profile, detail, True)
+
+
+def _browser_verified_at(services: Services, channel: Channel = Channel.BROWSER) -> datetime | None:
+    marker = services.runtime.browser_session(channel).get("verified_at")
     candidates = [utc(datetime.fromisoformat(marker))] if marker else []
     with services.db.session() as session:
         last_ok = session.scalar(
             select(func.max(ActionAttempt.finished_at)).where(
-                ActionAttempt.channel == Channel.BROWSER,
+                ActionAttempt.channel == channel,
                 ActionAttempt.status == ExecutionStatus.SUCCESS,
                 ActionAttempt.simulated.is_(False),
             )

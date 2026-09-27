@@ -370,4 +370,4 @@ def _channel(raw: str) -> Channel:
     try:
         return Channel(raw.upper())
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="channel must be API or BROWSER") from exc
+        raise HTTPException(status_code=400, detail="channel must be API, BROWSER or RESEARCH") from exc
