@@ -200,6 +200,11 @@ def plain_event(kind: str, subject: str, summary: str, detail: dict[str, Any]) -
         return "You changed settings: " + (", ".join(labels) or "settings") + later, True
     if kind == "alerts.changed":
         return "Phone alerts were set up", True
+    if kind == "testmode.changed":
+        targets = [str(t) for t in detail.get("targets") or []]
+        if targets:
+            return "Test mode is on: only " + ", ".join("@" + t for t in targets) + " can be messaged", True
+        return "Test mode is off: real businesses can be messaged (after your approval)", True
     if kind == "discovery.requested":
         planned = int(detail.get("planned") or 0)
         return "You asked it to look for new businesses now" + (
@@ -571,6 +576,7 @@ class MonitorService:
         """The home page: totals with the last 7 days, the latest messages, the best
         prospects, businesses by category, and chats waiting on Rohit."""
         now = self.s.clock.now()
+        settings = self.s.settings
         week_ago = now - timedelta(days=7)
         with self.s.db.session() as session:
             facts = _Facts.load(session)
@@ -600,6 +606,13 @@ class MonitorService:
                 )
             }
             awaiting = self._awaiting_you(session)
+            targets = [t.strip().lstrip("@").lower() for t in settings.rollout.allowed_targets if t.strip()]
+            test_leads = {
+                username: status.value
+                for username, status in session.execute(
+                    select(Lead.username, Lead.status).where(Lead.username.in_(targets))
+                )
+            }
 
         def kpi(times: list[datetime | None]) -> dict[str, int]:
             present = [t for t in times if t is not None]
@@ -634,6 +647,7 @@ class MonitorService:
             ],
             "categories": facts.breakdown(lambda row: row.niche or "other"),
             "awaiting_you": awaiting,
+            "test_leads": {t: test_leads.get(t) for t in targets},  # the test accounts, as businesses
         }
 
     def _message_item(self, action: Action, lead: Lead | None) -> dict[str, Any]:

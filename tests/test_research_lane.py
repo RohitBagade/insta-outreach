@@ -160,7 +160,7 @@ def test_live_research_account_gets_its_own_browser_profile(make_app, settings) 
     checks = {c.name: c for c in app.control.preflight()}
     assert checks["research_session"].mark == "WARN"  # finding leads needs it; sending does not
     assert "research_session" not in {c.name for c in blocking(list(checks.values()))}
-    assert "browser login --account research" in checks["research_session"].detail
+    assert "Log in to the research account" in checks["research_session"].detail
 
 
 def test_login_command_picks_the_account(settings) -> None:

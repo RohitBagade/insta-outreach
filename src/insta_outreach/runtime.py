@@ -126,6 +126,25 @@ class RuntimeControl:
             )
         return validated
 
+    def unset_limit_overrides(self, keys: list[str], by: str) -> None:
+        """Drop some runtime overrides so the configured values apply again."""
+        current = self.limit_overrides()
+        dropped = [key for key in keys if current.pop(key, None) is not None]
+        if not dropped:
+            return
+        with self._db.session() as session:
+            self._put(session, LIMITS_KEY, current, by)
+            audit(
+                session,
+                self._clock.now(),
+                actor=by,
+                kind="limits.changed",
+                subject="runtime",
+                summary="limit overrides removed: " + ", ".join(sorted(dropped)) + " (configured values apply)",
+                removed=sorted(dropped),
+                active_overrides=current,
+            )
+
     def clear_limit_overrides(self, by: str) -> None:
         with self._db.session() as session:
             self._put(session, LIMITS_KEY, {}, by)

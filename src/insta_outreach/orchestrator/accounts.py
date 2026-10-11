@@ -161,6 +161,7 @@ class AccountSessions:
         def announce(text: str) -> None:
             job.message = text
 
+        ok = False
         try:
             async with self.s.executor.lane_lock(channel):  # lets a running step finish first
                 await self.s.executor.adapters[channel].close()  # frees the browser profile
@@ -187,6 +188,14 @@ class AccountSessions:
             job.finished_at = self.s.clock.now()
             if stopped_here:
                 self._control.resume_lane(channel, by=by, note="login window closed")
+        if ok and stopped_here:  # the lane is open again: prove the login works, read-only, in the same job
+            job.state, job.message = "running", "Logged in. Checking the login, read-only…"
+            await self._check(job, chosen, channel, by)
+            job.message = (
+                "Logged in and checked: your profile opened normally."
+                if job.state == "ok"
+                else f"Logged in; the check failed: {job.message}"
+            )
 
     def start_check(self, which: str, by: str) -> dict[str, Any]:
         chosen, channel = self._ready(which)
@@ -196,6 +205,9 @@ class AccountSessions:
         return job.as_dict(self._local)
 
     async def _run_check(self, job: Job, chosen: Settings, channel: Channel, by: str) -> None:
+        await self._check(job, chosen, channel, by)
+
+    async def _check(self, job: Job, chosen: Settings, channel: Channel, by: str) -> None:
         """A read-only look at the account's own profile, through the normal lane:
         same pacing, and a checkpoint stops the lane exactly as in real work."""
         settings = self.s.settings

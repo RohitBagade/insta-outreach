@@ -386,6 +386,11 @@ def create_api(app: App, run_orchestrator: bool = False, restarter: Restarter | 
         outcome = guarded(lambda: app.setup.change(changes, by=who))
         return outcome | {"setup": setup_view()}
 
+    @api.patch("/api/setup/test-mode")
+    def set_test_mode(body: dict[str, Any] = Body(...), who: str = Depends(require_token)) -> dict[str, Any]:
+        outcome = guarded(lambda: app.setup.set_test_mode(body.get("targets") or [], by=who))
+        return outcome | {"setup": setup_view()}
+
     @api.post("/api/setup/restart")
     async def restart(who: str = Depends(require_token)) -> dict[str, Any]:
         if restarter is None:

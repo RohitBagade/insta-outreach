@@ -121,7 +121,7 @@ def _live_config(tmp_path: Path) -> str:
     return str(config)
 
 
-def test_cli_refuses_live_autonomous_and_run_will_not_start(tmp_path: Path, capsys) -> None:
+def test_cli_refuses_live_autonomous_and_run_steps_down(tmp_path: Path, capsys) -> None:
     config = _live_config(tmp_path)
     assert main(["--config", config, "mode", "AUTONOMOUS", "--confirm"]) == 2
     assert "AUTONOMOUS refused" in capsys.readouterr().err
@@ -129,15 +129,22 @@ def test_cli_refuses_live_autonomous_and_run_will_not_start(tmp_path: Path, caps
     out = capsys.readouterr().out
     assert "FAIL" in out and "AUTONOMOUS would be REFUSED" in out
 
-    # Even if the stored mode is AUTONOMOUS (set behind the CLI's back), `run` refuses to start.
+    # Even if the stored mode is AUTONOMOUS (set behind the CLI's back), the program starts
+    # in APPROVAL (every send waits for a click) and says why, instead of refusing to start.
     from insta_outreach.app import build_app
+    from insta_outreach.cli import startup_guard
     from insta_outreach.config import load_settings
 
     app = build_app(load_settings(config))
     app.runtime.set_mode(OperatingMode.AUTONOMOUS, by="test")
+    failing_checks = startup_guard(app)
+    assert {c.name for c in failing_checks} >= {"control_token", "send_lane"}
+    assert app.runtime.mode() is OperatingMode.APPROVAL
+    kinds = [e["kind"] for e in app.control.audit_events(limit=5)]
+    assert kinds[:2] == ["mode.changed", "mode.refused"]  # newest first: the step down, then why
+    assert "Switched to Approval" in capsys.readouterr().out
+    assert startup_guard(app) == []  # already stepped down: nothing to do, never stepped back up
     app.db.dispose()
-    assert main(["--config", config, "run", "--no-api"]) == 2
-    assert "REFUSING TO START" in capsys.readouterr().err
 
 
 async def test_sandbox_allowlist_keeps_outbound_on_listed_handles(make_app, settings, clock) -> None:

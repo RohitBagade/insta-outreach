@@ -1,5 +1,7 @@
 # Research: official APIs vs. browser agent (September 2026)
 
+*Background for reviewers and developers. To run the bot, see [GETTING_STARTED.md](GETTING_STARTED.md).*
+
 This document answers two questions:
 
 - what Meta's official Instagram APIs can do for B2B outreach;

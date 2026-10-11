@@ -2,7 +2,9 @@
 
 Work through the phases in order and tick each box. Every phase ends with a **pass condition**. Do not start the next phase until it holds. The system enforces the most important one itself: AUTONOMOUS is refused for the live account until every go-live check passes (Mission Control → Settings → *Go-live checks*; see [VERIFY.md §5](VERIFY.md#5-modes-and-why-autonomous-cannot-run-live-without-credentials)).
 
-**Everything below is done in Mission Control.** Start it by double-clicking the *Mission Control* file that `insta-outreach setup` put in the project folder (`Mission Control.cmd` on Windows). It opens the page and signs you in. Closing its window stops the program. Each step also names the command-line equivalent, in case you prefer a terminal.
+**Everything below is done in Mission Control.** Install with `Install or update.cmd`, then start it by double-clicking `Mission Control.cmd` in the project folder ([GETTING_STARTED.md](GETTING_STARTED.md) is the short version of this page). It opens the page and signs you in. Closing its window stops the program. Some steps also name the command-line equivalent, for reviewers.
+
+The mode buttons read *Watch only* (OBSERVE), *Ask me before sending* (APPROVAL) and *Send by itself* (AUTONOMOUS). *Drafting* (DRAFT) appears with *Technical details* ticked.
 
 ## Phase 0: accounts and machine
 
@@ -32,28 +34,25 @@ Work through the phases in order and tick each box. Every phase ends with a **pa
 | `NOTIFY_WEBHOOK_URL` | optional: incidents and warm leads posted to n8n / Slack relay | `.env` |
 | `DASHBOARD_URL` | optional: your Tailscale address for Mission Control, linked in every alert | Settings → *Phone alerts* → *Mission Control link*, or `.env` |
 
-- [ ] **Switch to your real account in test mode.** Settings → *Where it runs* → **Switch to my real Instagram…**:
-  - *Test mode*: enter your test account's username. Outbound messages to any other handle become impossible.
-  - Keep **Don't look for new businesses yet** ticked: no searching at all during the sandbox.
-  - Keep **Show the browser window** ticked to watch the first tests.
-  - Press *Switch and restart*. The program restarts on your real account, in **Observe** mode: it sends nothing.
-- [ ] **Sandbox limits.** Settings → *Daily limits*: *First messages per day* 1, *First messages per hour* 1, *Follow-ups per business* 0. Settings → *Your messages*: *Fewest followers worth a message* 0, so a brand-new test account can qualify.
-- [ ] **Check:** Settings → *Test mode* shows `only @YOUR_TEST_ACCOUNT`; *Safety rules* → *Show every safety rule* lists `new conversations: 1/day, 1/hour`.
+- [ ] **Switch to your real account in test mode.** Settings → *Instagram* → **Switch to my real Instagram…**:
+  - *Your test account*: its username. **Test mode** is one switch for the whole sandbox: outbound messages to any other handle become impossible, 1 first message a day and an hour, no follow-ups, no searching (every campaign off), and *Fewest followers worth a message* 0 so a brand-new test account qualifies.
+  - *Research account*: optional here; see Phase 2b.
+  - Press *Switch and restart*. The program restarts on your real account with the browser window visible, in **Ask me before sending**: nothing is sent without your click.
+- [ ] **Check:** Settings → *Test mode* shows `only @YOUR_TEST_ACCOUNT`; *Advanced* → *Show every safety rule* lists `new conversations: 1/day, 1/hour`.
 
-Settings you change in Mission Control are saved in `config/settings.dashboard.yaml`, next to `settings.yaml` (which is never rewritten). Delete that file to go back to `settings.yaml` alone. Command line alternative: edit `config/settings.yaml` (sandbox values: `environment: live`, `browser.enabled: true`, `campaigns: []`, `rollout.allowed_targets: [YOUR_TEST_ACCOUNT]`, `scoring.min_followers: 0`, `limits.outreach_per_day: 1`), then `insta-outreach safety`.
+Settings you change in Mission Control are saved in `config/settings.dashboard.yaml`, next to `settings.yaml` (which is never rewritten). Delete that file to go back to `settings.yaml` alone. Command line alternative: edit `config/settings.yaml` (sandbox values: `environment: live`, `browser.enabled: true`, `campaigns: []`, `rollout.allowed_targets: [YOUR_TEST_ACCOUNT]`, `scoring.min_followers: 0`, `limits.outreach_per_day: 1`, `limits.outreach_per_hour: 1`, `limits.max_followups_per_lead: 0`), then `insta-outreach safety`.
 
-**Pass condition:** Settings → *Go-live checks* shows *Control token* ok. *Instagram login* and *Messages you approved* are *not yet*: expected at this point. Until you log in, the bot leaves the browser alone and the dashboard says **Log in to Instagram to start**.
+**Pass condition:** Settings → *Before "Send by itself"* shows *Control token* ok. *Instagram login* and *Messages you approved* are still to do: expected at this point. Until you log in, the bot leaves the browser alone and the dashboard's *Get started with your real account* card starts with **Log in…**.
 
 ## Phase 2: browser session
 
-- [ ] **Log in.** Settings → *Instagram accounts* → **Log in…** next to @lemmedeliver. A Chromium window opens on Instagram's login page, on the computer running the program.
+- [ ] **Log in.** Right after the restart a Chromium window opens on Instagram's login page, on the computer running the program. (Later, or if you closed it: **Log in…** on the Get-started card or in Settings → *Instagram accounts*.)
   - Log in to @lemmedeliver **yourself**, including 2FA or any "confirm it's you" step. The program never types credentials and never answers security checks.
-  - The window closes by itself once the home feed loads; the account shows *Done. logged in; session saved…*.
-- [ ] **Test the login (read-only).** Press **Test login**. It opens @lemmedeliver's own profile through the normal lane, with the normal pacing, and never messages anyone. Expect *The login works*.
+  - The window closes by itself once the home feed loads. The program then checks the login read-only: it opens @lemmedeliver's own profile through the normal lane, with the normal pacing, and never messages anyone. Expect *Logged in and checked: your profile opened normally.* **Test login** repeats that check at any time.
 - [ ] **Optional deeper check (command line).** `insta-outreach browser probe --target YOUR_TEST_ACCOUNT --query "cafe Thane"` also compares the profile fields it reads with what you see on Instagram (name, bio, category, followers, website, message button) and runs a search. Any mismatch is UI drift: stop and share the output. The fix is a selector override in a YAML `ui_map`, not a code change.
-- [ ] **Go-live checks.** *Instagram login (your account)* is now ok. Login and Test login both record a verified session.
+- [ ] **Go-live checks.** *Instagram login (your account)* is now ok. The login check and Test login both record a verified session.
 
-**Pass condition:** Test login says the login works; *Go-live checks* shows only *Messages you approved* not yet passing.
+**Pass condition:** the account says *Logged in and checked*; Settings → *Before "Send by itself"* has only *Messages you approved* left to do.
 
 ## Phase 2b: research account (recommended)
 
@@ -65,8 +64,8 @@ A second Instagram account does all the searching and profile reading, in its ow
 Instagram can still link accounts used from the same computer or Wi-Fi. This lowers the risk to your brand account; it does not hide the automation.
 
 - [ ] **Create the account.** Use a normal-looking personal account: a real name, a photo, a few follows. Log in on your phone once and use it by hand for a few days before the bot does.
-- [ ] **Turn it on.** Settings → *Instagram accounts* → *Use a separate research account*: tick it, enter its username, *Save*, then *Restart now* in the blue bar.
-- [ ] **Log in and test.** The research account now has its own row: **Log in…** (log in to the **second** account yourself, including 2FA), then **Test login**. It gets its own browser profile in `data/browser_profiles/research/`.
+- [ ] **Turn it on.** Either enter its username in *Switch to my real Instagram…* (Phase 1), or later in Settings → *Instagram accounts* → *Use a separate research account*: tick it, enter its username, *Save*, then *Restart now* in the blue bar.
+- [ ] **Log in.** The research account has its own row and its own step on the Get-started card: **Log in…** (log in to the **second** account yourself, including 2FA). The login is checked read-only, like the main account's. It gets its own browser profile in `data/browser_profiles/research/`.
 - [ ] **Go-live checks** show *Instagram login (research account)* ok. The Dashboard's *Account health* lists the *Research account* with its own page-view meter.
 
 Command line alternative: `research.enabled: true` and `research.account.username` in `config/settings.yaml`, then `insta-outreach browser login --account research` and `insta-outreach browser probe --account research`.
@@ -105,20 +104,17 @@ You can come back to this phase after Phase 4.
 
 **Pass condition:** Meta's "Verify and save" succeeds. After you send a DM from the test account (Phase 4), Activity shows it was received. Deliveries with a bad signature are rejected (HTTP 403).
 
-## Phase 4: sandbox test with your own test account (OBSERVE → DRAFT → APPROVAL)
+## Phase 4: sandbox test with your own test account (Ask me before sending)
 
 This whole phase is rehearsed automatically against the mock site by `pytest tests/test_live_sandbox.py -v`.
 
 Work between **10:00 and 20:00 IST**. Outside the send hours (and the browser hours, 09:30-21:30) everything waits; the Dashboard's top box says what it is waiting for.
 
-- [ ] **Add the test account.** Businesses → **Add a business** → your test account's username, note "sandbox test".
-- [ ] **OBSERVE.** The mode switch (top right) is on *Observe*. Within a few minutes the test account is checked.
+- [ ] **The test account is a business.** The program adds it by itself at start (the Get-started card has an *Add it* button otherwise). Within a few minutes it is checked.
   - Click it in Businesses: expect *good fit*, correct facts, and opportunities such as *new website* and *online booking*. *Why the bot did what it did* shows every step.
-  - Approvals is empty: Observe never writes messages.
-- [ ] **DRAFT.** Switch the mode to *Draft*.
-  - Approvals shows exactly **one** draft, addressed to your test account.
-  - Nothing arrived in the test account's Instagram inbox.
-- [ ] **APPROVAL.** Switch the mode to *Approval*, then press **Approve** on the draft. Edit the text first if you like; your edit is checked again.
+- [ ] **The draft.** Approvals shows exactly **one** message, addressed to your test account.
+  - Nothing arrived in the test account's Instagram inbox: in *Ask me before sending* nothing goes out without your click.
+- [ ] **Approve.** Press **Approve** on the message. Edit the text first if you like; your edit is checked again.
   - Watch the browser window: it opens the test account's profile, opens the chat, types the exact approved text and sends it.
   - The message arrives in the test account's **Requests** folder.
   - Dashboard → *Latest messages* shows it as *sent*; the business's details show it in the chat, with a screenshot in its trail.
@@ -133,7 +129,7 @@ Work between **10:00 and 20:00 IST**. Outside the send hours (and the browser ho
   - To keep testing, press *Remove* on those rows. Both removals are recorded in the history.
 - [ ] **Checkpoint behaviour.** Do **not** try to trigger a real checkpoint. It is proven in simulation and against the mock (VERIFY.md §4).
   - If Instagram shows one on its own, the browser stops, a red strip says *Instagram needs you*, and Problems shows the screenshot.
-  - Complete the check yourself in the Instagram app, then press **Resume**.
+  - Complete the check yourself in the Instagram app, then press **I fixed it on Instagram: resume**.
 
 Command line alternative for this phase: `add-lead`, `mode`, `tick`, `approvals` / `approve`, `messages`, `release`, `suppressions` / `unsuppress`, `lane resume browser`.
 
@@ -145,22 +141,20 @@ Command line alternative for this phase: `add-lead`, `mode`, `tick`, `approvals`
 - no problem is open;
 - Activity tells the whole story.
 
-## Phase 5: the real account (OBSERVE → DRAFT → APPROVAL)
+## Phase 5: the real account (Watch only → Ask me before sending)
 
-Lift the sandbox in Mission Control:
-- Settings → *Test mode*: clear the list, *Save* (it asks you to confirm);
-- Campaigns: switch your campaign(s) back on, and check the kinds of business and places;
-- Settings → *Your messages*: *Fewest followers worth a message* back to 100;
-- Settings → *Daily limits*: keep them low at first, e.g. *First messages per day* 5.
+Lift the sandbox with one button: **Leave test mode** (on the Get-started card, or Settings → *Test mode*). It asks you to confirm, then:
+- real businesses can be messaged, still only after your OK;
+- the campaigns are switched back on (check the kinds of business and places on the Campaigns page);
+- *Fewest followers worth a message* goes back to the default;
+- the pace starts low: 5 first messages a day. Change it in Settings → *Limits & hours*.
 
-- [ ] **5a. OBSERVE, 1-3 days.** Mode *Observe*. Press **Find businesses now** once if you do not want to wait for the first search.
+- [ ] **5a. Watch only, 1-3 days.** Switch the mode to *Watch only* right after leaving test mode. Press **Find businesses now** once if you do not want to wait for the first search.
   - Daily: Businesses and Problems.
   - Spot-check 10 businesses (click them): are the facts true? Are the *not a fit* decisions right?
   - **Pass:** no factual errors in 10 spot checks, no problems, browser activity only within its hours (Activity).
-- [ ] **5b. DRAFT, 1-2 days.** Mode *Draft*.
-  - Read at least 20 drafts in Approvals.
-  - **Pass:** every claim in every draft is true and the tone is right. Use *Reject & rewrite* if not; your reasons go into the history.
-- [ ] **5c. APPROVAL, about a week.** Mode *Approval*. Approve drafts one by one in Approvals.
+- [ ] **5b. Ask me before sending, about a week.** Approve messages one by one in Approvals.
+  - Read the first 20 carefully before approving any: every claim must be true and the tone right. Use *Reject & rewrite* if not; your reasons go into the history. (*Drafting* mode, under *Technical details*, writes messages without offering to send them, if you prefer that for the first days.)
   - Mark how conversations go in each business's details (*Sales stage*: interested, meeting booked, proposal sent, client). Analytics then shows interested and clients per 100 messaged.
   - **Pass:**
     - at least 3 approved sends succeeded (*Go-live checks* → *Messages you approved*);
@@ -170,17 +164,17 @@ Lift the sandbox in Mission Control:
 
 ## Phase 6: AUTONOMOUS (only when you decide, and only if every go-live check passes)
 
-- [ ] **Check.** Settings → *Go-live checks* shows no *not yet*.
-- [ ] **Switch.** Press *Autonomous* in the mode switch. It asks for confirmation, and the attempt is recorded either way.
-- [ ] **Watch the first day.** Keep limits low (Settings → *Daily limits*, e.g. 5 a day, 2 an hour). Watch Activity and Problems. Raise limits gradually, if at all.
+- [ ] **Check.** Settings → *Before "Send by itself"* has nothing left to do. Until then *Send by itself* shows a 🔒 and clicking it opens that list.
+- [ ] **Switch.** Press *Send by itself*. It asks for confirmation, and the attempt is recorded either way.
+- [ ] **Watch the first day.** Keep limits low (Settings → *Limits & hours*, e.g. 5 a day, 2 an hour). Watch Activity and Problems. Raise limits gradually, if at all.
 
 ## Stop and roll back, at any time
 
 | Situation | In Mission Control | Command line |
 |---|---|---|
 | Stop everything now | **Pause all** (top right) | `insta-outreach pause on` |
-| Stop sending, keep preparing | Mode **Approval** (auto-approved items go back to the approval queue) | `insta-outreach mode APPROVAL` |
-| Stop the browser only | Dashboard → *Account health* → Browser → **Stop** | `insta-outreach lane halt browser --note "…"` |
+| Stop sending, keep preparing | Mode **Ask me before sending** (auto-approved items go back to the approval queue) | `insta-outreach mode APPROVAL` |
+| Stop the browser only | Settings → *Instagram accounts* → **Stop this account** | `insta-outreach lane halt browser --note "…"` |
 | Never contact someone | The business's details → **Never contact**, or Settings → *Never contact* | `insta-outreach suppress @handle` (or `--kind DOMAIN/PHONE/EMAIL`) |
 | Take a conversation over | Chats → **Take over** | `insta-outreach claim @handle` |
-| Back to the simulation | Settings → *Where it runs* → **Back to the simulation** | `environment: local` in `config/settings.yaml` |
+| Back to the simulation | Settings → *Where it runs* → **Back to the simulation** (also turns test mode off) | `environment: local` in `config/settings.yaml` |

@@ -24,7 +24,7 @@ from pydantic import BaseModel, ValidationError
 
 from insta_outreach.config import Settings, compose_settings, overlay_path, read_overlay
 from insta_outreach.discovery.strategies import REGISTRY
-from insta_outreach.domain.enums import Environment
+from insta_outreach.domain.enums import Environment, OperatingMode
 from insta_outreach.util.text import InvalidUsername, canonical_username
 
 
@@ -40,11 +40,15 @@ class Editable:
 
 EDITABLE: dict[str, Editable] = {
     "environment": Editable("Real Instagram or the simulation", restart=True),
+    "default_mode": Editable("Mode at the first start", restart=True),
     "browser.enabled": Editable("Use the browser on Instagram", restart=True),
     "browser.headless": Editable("Hide the browser window while it works", restart=True),
     "research.enabled": Editable("Separate research account", restart=True),
     "research.account.username": Editable("Research account username", restart=True),
     "rollout.allowed_targets": Editable("Test mode: only message these accounts"),
+    "limits.outreach_per_day": Editable("First messages per day"),
+    "limits.outreach_per_hour": Editable("First messages per hour"),
+    "limits.max_followups_per_lead": Editable("Follow-ups per business"),
     "schedule.send_hours": Editable("Sending hours"),
     "schedule.browser_active_hours": Editable("Browser hours"),
     "scoring.min_score_to_contact": Editable("Lowest score worth a message"),
@@ -276,11 +280,15 @@ def _campaigns(raw: Any) -> list[dict[str, Any]]:
 # Turns what the page sent into the value settings.yaml would hold.
 _NORMALIZE: dict[str, Callable[[Any], Any]] = {
     "environment": lambda v: Environment(str(v).lower()).value,
+    "default_mode": lambda v: OperatingMode(str(v).upper()).value,
     "browser.enabled": bool,
     "browser.headless": bool,
     "research.enabled": bool,
     "research.account.username": lambda v: _handle(v, "research account") if str(v or "").strip() else "",
     "rollout.allowed_targets": lambda v: _handles(v, "test accounts"),
+    "limits.outreach_per_day": lambda v: max(0, int(v)),
+    "limits.outreach_per_hour": lambda v: max(0, int(v)),
+    "limits.max_followups_per_lead": lambda v: max(0, int(v)),
     "schedule.send_hours": lambda v: _hours(v, "sending hours"),
     "schedule.browser_active_hours": lambda v: _hours(v, "browser hours"),
     "scoring.min_score_to_contact": lambda v: min(100, max(0, int(v))),

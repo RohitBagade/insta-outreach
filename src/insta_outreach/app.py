@@ -217,7 +217,7 @@ def build_app(
     orchestrator = Orchestrator(services, pipeline, worker, event_source)
     control = ControlService(services, lanes, validator)
     monitor = MonitorService(services, lanes, ledger)
-    setup = SetupService(services, notifier, AccountSessions(services, lanes, control, monitor.local))
+    setup = SetupService(services, notifier, AccountSessions(services, lanes, control, monitor.local), control)
     return App(
         settings=settings,
         db=db,

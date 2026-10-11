@@ -19,7 +19,7 @@ data/
 # Local configuration and secrets
 config/settings.yaml
 config/*.dashboard.yaml
-# Start files written by `insta-outreach setup` (they hold this computer's paths)
+# The start file `insta-outreach setup` writes (relative paths; rewritten by every setup)
 Mission Control.cmd
 Mission Control.command
 mission-control.sh

@@ -38,10 +38,10 @@
       <div class="top-title"><h1 id="pageTitle">Dashboard</h1><span class="env" id="env">…</span></div>
       <div class="top-actions">
         <div class="modes" role="group" aria-label="Operating mode" id="modes">
-          <button data-mode="OBSERVE" title="Finds and checks businesses. Never writes or sends anything.">Observe</button>
-          <button data-mode="DRAFT" title="Also writes messages for you to read. Never sends.">Draft</button>
-          <button data-mode="APPROVAL" title="Sends only the messages you approve.">Approval</button>
-          <button data-mode="AUTONOMOUS" title="Sends on its own, within every limit.">Autonomous</button>
+          <button data-mode="OBSERVE" title="Finds and checks businesses. Never writes or sends anything.">Watch only</button>
+          <button data-mode="DRAFT" hidden title="Writes messages for you to read. Never sends (command line only).">Drafting</button>
+          <button data-mode="APPROVAL" title="Every message waits for your OK. Nothing is sent without your click.">Ask me before sending</button>
+          <button data-mode="AUTONOMOUS" title="First messages and follow-ups go out by themselves, within your limits.">Send by itself</button>
         </div>
         <button id="pause" class="pause"><i data-icon="pause"></i><span>Pause all</span></button>
         <span class="clock" id="clock" title="The program's clock"></span>
@@ -56,6 +56,7 @@
     <main id="content">
       <!-- Dashboard -->
       <section class="page" id="page-dashboard" data-title="Dashboard">
+        <section class="card started" id="getStarted" hidden></section>
         <div class="card hero" id="now">
           <div class="hero-main">
             <div class="now-head"><span id="nowMark"></span><h2 id="nowText">Loading…</h2></div>
@@ -102,16 +103,6 @@
           <div class="card-head"><h3>Businesses found, by category</h3><span class="sub">hover a bar for the numbers</span></div>
           <div id="categories"></div>
         </section>
-        <details class="card help">
-          <summary>How to read this page</summary>
-          <ol>
-            <li><b>The top box</b> says in one sentence what the bot is doing right now.</li>
-            <li><b>The six numbers</b> are your funnel: found, good fit, messaged, replied, interested, clients. The small line under each is the last 7 days.</li>
-            <li><b>The coloured strip</b> under the header appears only when something needs you: an approval, a reply or an Instagram problem.</li>
-            <li><b>Today's progress</b> is your to-do list for today; everything ticks itself off.</li>
-            <li>Click any <b>@name</b> to see the chat and why the bot did each thing. Everything is also in the menu on the left.</li>
-          </ol>
-        </details>
       </section>
 
       <!-- Approvals -->
@@ -147,7 +138,6 @@
           <p class="page-intro">Who the bot looks for and how it finds them. Saved changes apply straight away.</p>
           <span class="spacer"></span>
           <button id="addCampaign"><i data-icon="plus"></i>New campaign</button>
-          <button class="primary" id="findNow2"><i data-icon="search"></i>Find businesses now</button>
         </div>
         <div class="stack" id="campaigns"></div>
       </section>
@@ -231,9 +221,9 @@
 <dialog id="tokenDialog">
   <form method="dialog">
     <h2>Control token</h2>
-    <p class="small muted">Starting Mission Control with the <b>Mission Control</b> file (or <code>insta-outreach run --open</code>) fills this in for you. Otherwise paste <code>CONTROL_API_TOKEN</code> from the <code>.env</code> file in your project folder.</p>
+    <p class="small muted">On your own computer, open the <b>Mission Control</b> file once and this page signs in by itself. On a phone or another device, paste <code>CONTROL_API_TOKEN</code> from the <code>.env</code> file in the project folder, once.</p>
     <input id="tokenInput" type="password" autocomplete="off" placeholder="paste token">
-    <label class="inline-check small"><input type="checkbox" id="tokenRemember"> Remember on this computer</label>
+    <label class="inline-check small"><input type="checkbox" id="tokenRemember"> Remember on this device</label>
     <div class="dialog-actions"><button value="ok" class="primary">Save</button></div>
   </form>
 </dialog>
@@ -251,13 +241,16 @@
 <dialog id="goLiveDialog">
   <form method="dialog" id="goLiveForm">
     <h2>Switch to your real Instagram</h2>
-    <p class="small">The program restarts connected to Instagram as @<span id="goLiveAccount"></span>. It starts in <b>Observe</b> mode: it sends nothing until you switch to Approval and approve a message.</p>
-    <label class="field"><span>Test mode: while you test, only message these accounts</span>
+    <p class="small">The program restarts connected to Instagram as <b>@<span id="goLiveAccount"></span></b>. After the restart a browser window opens on this computer: log in yourself, including any security check. The program never types your password.</p>
+    <label class="field"><span>Your test account</span>
       <input type="text" id="goLiveTargets" autocomplete="off" placeholder="your_second_account">
-      <span class="help-text">Your own second account is ideal. Clear this later in Settings to message real businesses.</span>
+      <span class="help-text">Test mode: only this account can receive messages, 1 a day, no searching for businesses. Your own second account is ideal. You leave test mode later with one button.</span>
     </label>
-    <label class="inline-check"><input type="checkbox" id="goLiveNoSearch" checked> Don't look for new businesses yet (you add them by hand)</label>
-    <label class="inline-check"><input type="checkbox" id="goLiveShow" checked> Show the browser window while it works</label>
+    <label class="field"><span>Research account (optional, recommended)</span>
+      <input type="text" id="goLiveResearch" autocomplete="off" placeholder="a second, ordinary account">
+      <span class="help-text">Does the searching and profile reading, so your main account only sends. Use it by hand for a few days first.</span>
+    </label>
+    <p class="small ink2" id="goLiveMode">It starts in <b>Ask me before sending</b>: nothing goes out until you press Approve, and only your test account can receive it.</p>
     <div class="dialog-actions"><button value="cancel" formnovalidate>Cancel</button><button value="ok" class="primary">Switch and restart</button></div>
   </form>
 </dialog>
