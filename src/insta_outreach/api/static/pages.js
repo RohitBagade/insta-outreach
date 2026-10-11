@@ -105,7 +105,8 @@ function progressItems(o, d) {
   const u = o.usage; const a = o.attention; const items = [];
   const halted = o.lanes.filter((l) => l.configured && l.state === 'HALTED');
   for (const l of o.lanes.filter((x) => x.needs_login)) {
-    items.push({state: 'todo', title: l.channel === 'RESEARCH' ? 'Log in to the research account' : 'Log in to Instagram', sub: 'a window opens on this computer; you type the password yourself', href: '#/settings'});
+    const which = l.channel === 'RESEARCH' ? 'research' : 'brand';
+    items.push({state: 'todo', title: which === 'research' ? 'Log in to the research account' : 'Log in to Instagram', sub: 'a window opens on this computer; you type the password yourself', button: ['Log in…', () => loginAccount(which)]});
   }
   items.push(halted.length
     ? {state: 'bad', title: 'Fix the Instagram problem, then press Resume', sub: halted.map((l) => `${laneName(l.channel)}: ${laneWhy(l.reason)}`).join('; '), href: '#/problems'}
@@ -124,11 +125,11 @@ function progressItems(o, d) {
       sub: u.in_send_hours ? `sending hours ${u.send_hours}` : `sending starts ${when(u.next_send_window_local)}`, meter: [u.outreach_today, u.outreach_per_day]});
   }
   items.push({state: 'info', title: `Businesses checked today: ${fmt(u.inspections_today)}`, sub: `limit ${fmt(u.profile_inspections_per_day)} a day`, meter: [u.inspections_today, u.profile_inspections_per_day]});
-  if (!o.simulated) {
-    const failing = S.preflight.filter((c) => c.result === 'FAIL').length;
-    items.push(failing
-      ? {state: 'todo', title: `${plural(failing, 'go-live check', 'go-live checks')} not passing yet`, sub: 'needed only for Autonomous mode', href: '#/settings'}
-      : {state: 'done', title: 'Every go-live check passes', href: '#/settings'});
+  if (!o.simulated && !(S.setup && S.setup.test_mode.on)) {
+    const left = checksLeft().length;
+    items.push(left
+      ? {state: 'todo', title: `${plural(left, 'thing', 'things')} to do before "Send by itself"`, sub: 'the list is under Settings > Go-live checks', href: '#/settings'}
+      : {state: 'done', title: 'Ready for "Send by itself" whenever you choose', href: '#/settings'});
   }
   return items;
 }
@@ -144,9 +145,70 @@ function renderProgress() {
     const mark = {done: '✓', bad: '!', todo: '', info: ''}[it.state];
     return h('li', {}, h('span', {class: 'check ' + it.state, 'aria-label': it.state === 'done' ? 'done' : it.state === 'bad' ? 'needs you' : 'to do'}, mark),
       h('div', {}, h('div', {class: 'pt'}, it.title), it.sub ? h('div', {class: 'ps'}, it.sub) : null, bar),
-      it.href && it.state !== 'done' ? h('a', {class: 'link small', href: it.href}, 'Open') : h('span'));
+      it.button ? h('button', {class: 'small primary', onclick: it.button[1]}, it.button[0])
+        : it.href && it.state !== 'done' ? h('a', {class: 'link small', href: it.href}, 'Open') : h('span'));
   }));
 }
+
+// ---- Get started: the go-live sequence, one card, each step with its real button.
+const STARTED_KEY = 'io_started_done';
+function testLeadState() { const st = S.setup; const t = st && st.test_mode.targets[0]; return S.dash && t ? (S.dash.test_leads || {})[t] || null : null; }
+function startedSteps(o, st) {
+  const tm = st.test_mode; const target = tm.targets[0]; const at = target ? '@' + target : 'your test account';
+  const brand = st.accounts.find((a) => a.which === 'brand') || {};
+  const research = st.accounts.find((a) => a.which === 'research');
+  const loggedIn = !o.lanes.some((l) => l.channel === 'BROWSER' && l.needs_login);
+  const researchIn = !research || !o.lanes.some((l) => l.channel === 'RESEARCH' && l.needs_login);
+  const job = brand.job && brand.job.state === 'running';
+  const leadState = testLeadState();
+  const messaged = ['CONTACTED', 'REPLIED', 'HANDED_OFF', 'CLOSED'].includes(leadState);
+  const replied = ['REPLIED', 'HANDED_OFF', 'CLOSED'].includes(leadState);
+  const steps = [
+    {done: loggedIn, title: loggedIn ? `Logged in to @${brand.username || o.account}` : `Log in to @${brand.username || o.account}`,
+      sub: loggedIn ? (brand.verified_at_local ? `checked ${when(brand.verified_at_local)}` : '') : (job ? brand.job.message : 'a window opens on this computer; you type the password yourself'),
+      button: loggedIn || job ? null : ['Log in…', () => loginAccount('brand')]},
+  ];
+  if (research) steps.push({done: researchIn, title: researchIn ? `Logged in to the research account @${research.username}` : `Log in to the research account @${research.username}`,
+    sub: researchIn ? '' : 'it does the searching, so your main account only sends', button: researchIn || (research.job && research.job.state === 'running') ? null : ['Log in…', () => loginAccount('research')]});
+  steps.push({done: tm.on, title: tm.on ? `Test mode is on: only ${at} can be messaged` : 'Test mode is off: real businesses can be messaged',
+    sub: tm.on ? `${plural(tm.per_day, 'first message', 'first messages')} a day, ${tm.searching ? 'searches still on' : 'no searching'}` : 'turn it on in Settings > Instagram to test with your own account first', button: null});
+  if (tm.on) {
+    steps.push({done: Boolean(leadState), title: leadState ? `${at} is in Businesses (${LEAD_STATUS[leadState] || nice(leadState)})` : `Add ${at} as a business`,
+      sub: leadState ? '' : 'it goes through the same checks as any business; the program does this by itself at start',
+      button: leadState ? null : ['Add it', () => act(() => post('/api/leads', {username: target, note: 'your test account'}), `Added ${at}: it will be checked shortly`).then(() => { S.loadedAt.dashboard = 0; })]});
+    const asking = o.mode === 'APPROVAL' || o.mode === 'AUTONOMOUS';
+    steps.push({done: asking, title: asking ? 'Mode is "Ask me before sending"' : 'Switch to "Ask me before sending"', sub: asking ? '' : 'the bot writes a message for your test account; nothing goes out without your click',
+      button: asking ? null : ['Ask me before sending', () => act(() => post('/api/mode', {mode: 'APPROVAL'}), 'Mode is now Ask me before sending')]});
+    steps.push({done: messaged, title: messaged ? `First message sent to ${at}` : `Approve the first message to ${at}`,
+      sub: messaged ? '' : `it appears in Approvals once the business is checked; sending happens between ${o.usage.send_hours}`, button: messaged ? null : (o.attention.pending_approvals ? ['Review', () => { location.hash = '#/approvals'; }] : null)});
+    steps.push({done: replied, title: replied ? 'Their reply reached you' : 'Test the replies',
+      sub: replied ? 'the chat is yours now' : `from ${at}: reply "yes interested" (Chats shows your turn), then send one message yourself as @${o.account} (the chat becomes yours), then reply "please stop" (Never contact lists it)`, button: null});
+    steps.push({done: false, title: 'Leave test mode when you are happy', sub: `searches start, real businesses get drafts for your OK, ${tm.off_per_day} first messages a day`,
+      button: ['Leave test mode', () => leaveTestMode(st)]});
+  }
+  return steps;
+}
+function leaveTestMode(st) {
+  const tm = st.test_mode;
+  if (!confirm(`Leave test mode?\n\nFrom now on any good-fit business can be messaged, still only after your OK in "Ask me before sending". Searches for new businesses start, and the pace is ${tm.off_per_day} first messages a day (change it in Settings > Limits).`)) return;
+  act(() => patch('/api/setup/test-mode', {targets: ''}), 'Test mode is off: real businesses, after your OK').then(() => { S.loadedAt.settings = 0; });
+}
+function renderStarted() {
+  const box = $('getStarted'); const o = S.overview; const st = S.setup;
+  const dismissed = recall(STARTED_KEY) === '1';
+  if (!o || o.simulated || !st || dismissed) { box.hidden = true; return; }
+  const steps = startedSteps(o, st);
+  const next = steps.findIndex((x) => !x.done);
+  box.hidden = false;
+  fill(box,
+    h('div', {class: 'card-head'}, h('h3', {}, 'Get started with your real account'),
+      st.test_mode.on ? null : h('button', {class: 'small ghost', onclick: () => { store(STARTED_KEY, '1'); renderStarted(); }}, 'Hide this')),
+    h('ol', {class: 'steps'}, steps.map((x, i) => h('li', {class: x.done ? 'done' : i === next ? 'next' : ''},
+      h('span', {class: 'check ' + (x.done ? 'done' : i === next ? 'todo' : '')}, x.done ? '✓' : String(i + 1)),
+      h('div', {}, h('div', {class: 'pt'}, x.title), x.sub ? h('div', {class: 'ps'}, x.sub) : null),
+      x.button && (i === next || x.button[0] === 'Leave test mode') ? h('button', {class: 'small ' + (i === next ? 'primary' : ''), onclick: x.button[1]}, x.button[0]) : h('span')))));
+}
+
 function renderLatest(d) {
   const list = $('todayList');
   if (!d.latest.length) { list.replaceChildren(h('div', {class: 'empty'}, S.overview && S.overview.mode === 'OBSERVE' ? 'Observe mode: nothing is written or sent. Switch to Draft or Approval (top right) to get messages.' : 'No messages yet.')); return; }
@@ -181,6 +243,8 @@ async function loadDashboard() {
   const d = await api('/api/dashboard');
   S.dash = d; renderKpis(d); renderFunnel(d); renderLatest(d); renderTop(d); renderCategories(d); renderProgress();
   $('b-chats').textContent = d.awaiting_you || '';
+  if (!S.setup) await pollSetup().catch(() => {});
+  renderStarted();
 }
 
 // ============================================================== approvals
@@ -208,6 +272,7 @@ async function loadApprovals() {
     const facts = [lead.category || lead.niche, lead.location, lead.followers !== null && lead.followers !== undefined ? fmt(lead.followers) + ' followers' : null].filter(Boolean).join(' · ');
     const approve = h('button', {class: 'primary'}, icon('check'), 'Approve');
     approve.addEventListener('click', busy(approve, () => act(() => post(`/api/actions/${a.id}/approve`, {edited_text: edited()}), edited() ? 'Approved with your edit' : 'Approved')));
+    const why = h('input', {type: 'text', class: 'why', placeholder: 'What should change? (optional, for a rewrite)', 'aria-label': 'What should change'});
     return h('div', {class: 'card item approval', dataset: {action: a.id}},
       h('div', {class: 'lead-side'},
         h('div', {class: 'lead-top'}, avatar(lead.full_name, a.target_username, true),
@@ -223,8 +288,8 @@ async function loadApprovals() {
         text, count,
         a.facts_used && a.facts_used.length ? h('div', {class: 'facts'}, 'Based on: ', ...a.facts_used.map((f) => h('span', {class: 'tag'}, nice(f)))) : null,
         h('div', {class: 'row'}, approve,
-          h('button', {onclick: () => { const reason = prompt('What should change? (kept in the history)', 'tone'); if (reason !== null) act(() => post(`/api/actions/${a.id}/reject`, {reason, redraft: true}), 'Rejected: a new version will be written'); }}, 'Reject & rewrite'),
-          h('button', {class: 'danger', onclick: () => { const reason = prompt("Reject and don't message this business? Reason:", 'not a fit'); if (reason !== null) act(() => post(`/api/actions/${a.id}/reject`, {reason, redraft: false}), 'Rejected'); }}, "Don't message"))));
+          h('button', {onclick: () => act(() => post(`/api/actions/${a.id}/reject`, {reason: why.value.trim() || 'rewrite requested', redraft: true}), 'A new version will be written')}, 'Reject & rewrite'), why,
+          h('button', {class: 'danger', onclick: () => { if (confirm(`Don't message ${lead.full_name || '@' + a.target_username}? It is marked "not a fit" and no message goes out.`)) act(() => post(`/api/actions/${a.id}/reject`, {reason: 'not a fit', redraft: false}), 'Rejected: they will not be messaged'); }}, "Don't message"))));
   }));
 }
 
@@ -338,6 +403,7 @@ const LIST_EXAMPLE = {
   text: 'bridal makeup thane', tag: '#thanedentist', handle: '@some.local.account',
   location: 'Bandra West | https://www.instagram.com/explore/locations/…', url: 'https://www.instagram.com/p/…',
 };
+const DEFAULT_WAYS = ['keyword_search', 'hashtag', 'suggested_accounts'];  // the rest need links or handles: advanced
 function campaignCard(c, index, info) {
   const stats = info.stats[c.id] || {found: 0, good_fit: 0, messaged: 0, replied: 0};
   const disabled = !info.can_edit;
@@ -351,10 +417,13 @@ function campaignCard(c, index, info) {
   const ways = info.strategies.map((st) => {
     const spec = specs.get(st.name) || {name: st.name, enabled: false, params: {}};
     const check = h('input', {type: 'checkbox', checked: spec.enabled !== false && specs.has(st.name), disabled});
-    const list = h('textarea', {placeholder: LIST_EXAMPLE[st.list_kind] || '', disabled, 'aria-label': st.list_label}, listToText(st.list_kind, (spec.params || {})[st.list]));
-    const box = h('div', {class: 'way' + (check.checked ? '' : ' off')}, h('label', {class: 'inline-check'}, check, h('strong', {}, st.label)), h('div', {class: 'help-text'}, st.help), h('span', {class: 'small muted'}, st.list_label), list);
+    const current = listToText(st.list_kind, (spec.params || {})[st.list]);
+    const list = h('textarea', {placeholder: LIST_EXAMPLE[st.list_kind] || '', disabled, 'aria-label': st.list_label}, current);
+    const basic = DEFAULT_WAYS.includes(st.name);
+    const box = h('div', {class: 'way' + (check.checked ? '' : ' off')}, h('label', {class: 'inline-check'}, check, h('strong', {}, st.label)), h('div', {class: 'help-text'}, st.help),
+      basic ? h('details', {open: current ? true : null}, h('summary', {class: 'small'}, st.list_label), list) : h('div', {}, h('span', {class: 'small muted'}, st.list_label), list));
     check.addEventListener('change', () => box.classList.toggle('off', !check.checked));
-    return {st, spec, check, list, box};
+    return {st, spec, check, list, box, basic};
   });
   const read = () => ({
     id: name.value.trim().toLowerCase(), enabled: on.checked,
@@ -368,6 +437,7 @@ function campaignCard(c, index, info) {
   save.addEventListener('click', busy(save, () => saveCampaigns((list) => { list[index] = read(); return list; }, 'Campaign saved: it applies from the next search')));
   const remove = h('button', {class: 'danger', disabled}, icon('trash'), 'Delete');
   remove.addEventListener('click', () => { if (confirm(`Delete the campaign "${c.id}"? Businesses it already found stay.`)) saveCampaigns((list) => { list.splice(index, 1); return list; }, 'Campaign deleted'); });
+  const advancedOn = ways.some((w) => !w.basic && w.check.checked) || c.min_score !== null && c.min_score !== undefined;
   return h('section', {class: 'card camp'},
     h('div', {class: 'camp-head'}, h('label', {class: 'inline-check', title: 'Switch this campaign on or off'}, on, h('span', {class: 'small'}, 'on')), c._new ? name : h('h3', {}, c.id),
       h('span', {class: 'spacer'}),
@@ -375,9 +445,11 @@ function campaignCard(c, index, info) {
     h('div', {class: 'fields-2'},
       h('label', {class: 'field'}, h('span', {}, 'Kinds of business'), niches, h('span', {class: 'help-text'}, 'comma-separated')),
       h('label', {class: 'field'}, h('span', {}, 'Places'), places, h('span', {class: 'help-text'}, 'cities or areas, comma-separated')),
-      h('label', {class: 'field'}, h('span', {}, 'Lowest score to message'), minScore, h('span', {class: 'help-text'}, 'empty: the general setting')),
       h('label', {class: 'field'}, h('span', {}, 'New businesses a day'), perDay, h('span', {class: 'help-text'}, 'at most'))),
-    h('div', {}, h('h3', {}, 'Ways to find them'), h('div', {class: 'ways'}, ways.map((w) => w.box))),
+    h('div', {}, h('h3', {}, 'How it finds them'), h('div', {class: 'ways'}, ways.filter((w) => w.basic).map((w) => w.box))),
+    h('details', {class: 'advanced', open: advancedOn ? true : null}, h('summary', {}, 'More ways to find businesses (advanced)'),
+      h('div', {class: 'form'}, h('div', {class: 'ways'}, ways.filter((w) => !w.basic).map((w) => w.box)),
+        h('label', {class: 'field'}, h('span', {}, 'Lowest score to message, for this campaign only'), minScore, h('span', {class: 'help-text'}, 'empty: the general setting')))),
     h('div', {class: 'row'}, save, c._new ? null : remove));
 }
 async function saveCampaigns(change, message) {
@@ -499,12 +571,28 @@ const CHECK_NAME = {
   incidents: 'No open problems', approved_sends: 'Messages you approved', sandbox: 'Test mode',
   global_pause: 'Pause switch', llm: 'Message writer (Claude)',
 };
+// What is left before "Send by itself", as a to-do with the real button for each row.
+function checkTodo(c) {
+  let m;
+  if (c.check === 'browser_session') return {text: 'Log in to Instagram', button: ['Log in…', () => loginAccount('brand')]};
+  if (c.check === 'research_session') return {text: 'Log in to the research account', button: ['Log in…', () => loginAccount('research')]};
+  if (c.check === 'approved_sends' && (m = /^(\d+) human-approved .*?; (\d+) required/.exec(c.detail || ''))) {
+    return {text: `Approve messages until ${m[2]} have been sent (${m[1]} of ${m[2]} so far)`, button: ['Approvals', () => { location.hash = '#/approvals'; }]};
+  }
+  if (c.check === 'lanes') return {text: 'Resume the stopped account (after you fixed it on Instagram)', button: ['Problems', () => { location.hash = '#/problems'; }]};
+  if (c.check === 'incidents') return {text: 'Close the open problems', button: ['Problems', () => { location.hash = '#/problems'; }]};
+  if (c.check === 'control_token') return {text: 'A control token is missing: double-click "Install or update.cmd" once, then start again', button: null};
+  if (c.check === 'send_lane') return {text: 'Switch to your real Instagram (Settings > Instagram)', button: null};
+  return {text: `${CHECK_NAME[c.check] || c.check}: ${c.detail}`, button: null};
+}
 const LIMIT_FIELDS = [
   ['outreach_per_day', 'First messages per day'], ['outreach_per_hour', 'First messages per hour'],
+  ['max_followups_per_lead', 'Follow-ups per business, at most'],
+];
+const MORE_LIMITS = [
   ['followups_per_day', 'Follow-ups per day'], ['replies_per_hour', 'Replies per hour'],
   ['profile_inspections_per_day', 'Profiles checked per day'], ['discovery_runs_per_day', 'Searches per day'],
   ['min_seconds_between_sends', 'Seconds between two messages, at least'], ['browser_units_per_hour', 'Browser page views per hour'],
-  ['max_followups_per_lead', 'Follow-ups per business, at most'],
 ];
 function setCard(id, title, sub, ...content) {
   return h('section', {class: 'card', id: 'set-' + id}, h('div', {class: 'card-head'}, h('h3', {}, title), sub ? h('span', {class: 'sub'}, sub) : null), h('div', {class: 'form'}, ...content));
@@ -515,10 +603,21 @@ async function saveSetup(changes, message) {
   if (out) { S.setup = out.setup; renderRestart(); renderSettings(out.setup); }
   return out;
 }
+// Settings that shape how the program is built apply after a restart: one confirm, then it restarts itself.
+async function saveAndRestart(changes, message, pending) {
+  const st = S.setup;
+  if (st && st.restart_supported) {
+    if (!confirm(`${message}. This restarts the program (a few seconds; this page reconnects by itself). Continue?`)) return undefined;
+    const out = await saveSetup(changes, message);
+    if (out) { if (pending) setPendingLogins(pending); await restartNowQuiet(); }
+    return out;
+  }
+  return saveSetup(changes, message);
+}
 function whereCard(st) {
   const v = st.values; const live = st.environment === 'live';
   const show = h('input', {type: 'checkbox', checked: v['browser.headless'] === false, disabled: !st.can_edit});
-  show.addEventListener('change', () => saveSetup({'browser.headless': !show.checked}, show.checked ? 'The browser window will show' : 'The browser will work hidden'));
+  show.addEventListener('change', () => saveAndRestart({'browser.headless': !show.checked}, show.checked ? 'The browser window will show while it works' : 'The browser will work hidden').then((o) => { if (!o) show.checked = !show.checked; }));
   const savedLive = v.environment === 'live';
   return setCard('where', 'Where it runs', null,
     h('div', {class: 'row'}, live ? pill('critical', 'Real Instagram') : pill('info', 'Simulation'), live ? h('span', {}, `connected as @${st.account}`) : h('span', {class: 'ink2'}, 'made-up businesses; nothing leaves your computer')),
@@ -527,50 +626,55 @@ function whereCard(st) {
       ? h('div', {class: 'row'}, h('button', {disabled: !st.can_edit, onclick: () => backToSimulation(st)}, 'Back to the simulation'))
       : h('div', {class: 'row'}, h('button', {class: 'primary', disabled: !st.can_edit, onclick: () => goLive(st)}, icon('login'), 'Switch to my real Instagram…')),
     h('p', {class: 'small ink2'}, live
-      ? 'Sending only happens in Approval (you approve each message) or Autonomous mode. Test mode below limits who can be messaged.'
-      : 'When you are ready: switch to your real account. It starts in Observe mode (it sends nothing) and, if you like, only messages test accounts you name.'),
-    h('label', {class: 'inline-check'}, show, 'Show the browser window while it works (applies after a restart)'),
+      ? 'Messages are sent only in "Ask me before sending" (after your OK) or "Send by itself". Test mode below limits who can receive them.'
+      : 'When you are ready: switch to your real account. It starts in test mode with your own test account, so nothing reaches a real business until you say so.'),
+    h('label', {class: 'inline-check'}, show, 'Show the browser window while it works'),
     st.can_edit ? null : h('p', {class: 'small muted'}, st.why_not));
 }
 function backToSimulation(st) {
-  if (!confirm('Switch back to the simulation? The program restarts; your real account is left alone.\n\nTest mode is switched off, and paused searches are switched back on, so the simulation works as before.')) return;
-  // Test mode and "don't look for businesses yet" belong to testing the real account: in the
-  // simulation they would stop it from writing messages to its made-up businesses.
-  const changes = {environment: 'local', 'rollout.allowed_targets': null};
-  if (st.values.campaigns.length && st.values.campaigns.every((c) => c.enabled === false)) changes.campaigns = st.values.campaigns.map((c) => ({...c, enabled: true}));
-  saveSetup(changes, 'Switching to the simulation').then((o) => o && st.restart_supported && restartNowQuiet());
+  if (!confirm('Switch back to the simulation? The program restarts; your real account is left alone. Test mode is switched off so the simulation works as before.')) return;
+  patch('/api/setup/test-mode', {targets: ''})
+    .then(() => saveSetup({environment: 'local'}, 'Switching to the simulation'))
+    .then((o) => o && st.restart_supported && restartNowQuiet())
+    .catch((e) => toast(String(e.message || e), true));
 }
-async function restartNowQuiet() { try { await post('/api/setup/restart'); toast('Restarting… this page reconnects by itself.'); } catch (e) { toast(String(e.message || e), true); } }
 function goLive(st) {
   const dlg = $('goLiveDialog'); $('goLiveAccount').textContent = st.account;
   $('goLiveTargets').value = (st.values['rollout.allowed_targets'] || []).join(', ');
+  $('goLiveResearch').value = st.values['research.enabled'] ? (st.values['research.account.username'] || '') : '';
   dlg.addEventListener('close', async () => {
     if (dlg.returnValue !== 'ok') return;
-    const changes = {environment: 'live', 'browser.enabled': true, 'browser.headless': !$('goLiveShow').checked, 'rollout.allowed_targets': $('goLiveTargets').value};
-    if ($('goLiveNoSearch').checked) changes.campaigns = st.values.campaigns.map((c) => ({...c, enabled: false}));
-    const out = await saveSetup(changes, 'Saved: real Instagram');
-    if (out && st.restart_supported) await restartNowQuiet();
+    const targets = $('goLiveTargets').value.trim(); const research = $('goLiveResearch').value.trim().replace(/^@/, '');
+    if (!targets && !confirm('No test account: any good-fit business could be messaged after your OK. Continue without test mode?')) return;
+    try {
+      if (targets) await patch('/api/setup/test-mode', {targets});
+      // The real account has its own database, so its mode is set through the start-up mode.
+      const changes = {environment: 'live', 'browser.enabled': true, 'browser.headless': false, default_mode: 'APPROVAL'};
+      if (research) { changes['research.enabled'] = true; changes['research.account.username'] = research; }
+      const out = await saveSetup(changes, 'Saved: real Instagram');
+      if (!out) return;
+      setPendingLogins(research ? ['brand', 'research'] : ['brand']);
+      if (st.restart_supported) await restartNowQuiet();
+    } catch (e) { toast(String(e.message || e), true); }
   }, {once: true});
   dlg.showModal();
 }
 function accountRow(a, st) {
   const job = a.job;
   const lane = LANE_STATE[a.lane_state] || ['neutral', a.lane_state];
-  const login = h('button', {class: 'primary small', disabled: a.simulated || !a.configured || (job && job.state === 'running')}, icon('login'), 'Log in…');
-  login.addEventListener('click', () => {
-    if (!confirm(`A browser window opens on this computer. Log in to @${a.username} yourself and complete any security check there: the program never types your password.\n\nThe window closes by itself once you're in (you have 15 minutes).`)) return;
-    act(() => post(`/api/accounts/${a.which}/login`), 'Login window opening on this computer…').then(() => { S.loadedAt.settings = 0; });
-  });
+  const login = h('button', {class: 'primary small', disabled: a.simulated || !a.configured || (job && job.state === 'running'), onclick: () => loginAccount(a.which)}, icon('login'), 'Log in…');
   const check = h('button', {class: 'small', disabled: a.simulated || !a.configured || (job && job.state === 'running')}, icon('shield'), 'Test login');
   check.addEventListener('click', () => act(() => post(`/api/accounts/${a.which}/check`), 'Checking the login (read-only)…'));
-  const verified = a.verified_at_local ? `login checked ${when(a.verified_at_local)}${a.verified_via ? ' (' + a.verified_via + ')' : ''}` : 'not logged in from this computer yet';
+  const verified = a.verified_at_local ? `login checked ${when(a.verified_at_local)}` : 'not logged in from this computer yet';
   return h('div', {class: 'acct-card', dataset: {account: a.which}},
     h('div', {class: 'row'}, h('strong', {}, '@' + a.username), h('span', {class: 'tag'}, a.which === 'brand' ? 'your account: sends messages' : 'research account: finds businesses'),
       h('span', {class: 'spacer'}), a.configured ? status(lane[0], lane[1]) : status('neutral', 'not running')),
     h('div', {class: 'small ink2'}, a.simulated ? 'Simulation: no real login needed.' : verified),
     a.lane_reason && a.lane_state !== 'ACTIVE' ? h('div', {class: 'small'}, laneWhy(a.lane_reason)) : null,
     job ? h('div', {class: 'job ' + job.state}, h('strong', {}, {running: 'Working… ', ok: 'Done. ', failed: 'Not done. '}[job.state]), job.message) : null,
-    a.simulated ? null : h('div', {class: 'row'}, login, check, a.lane_state === 'HALTED' ? h('button', {class: 'small', onclick: () => resumeLane(a.channel)}, 'Resume…') : null),
+    a.simulated ? null : h('div', {class: 'row'}, login, check,
+      a.configured && a.lane_state === 'HALTED' ? h('button', {class: 'small', onclick: () => resumeLane(a.channel)}, 'I fixed it on Instagram: resume') : null,
+      a.configured && a.lane_state === 'ACTIVE' ? h('button', {class: 'small danger', onclick: () => haltLane(a.channel)}, 'Stop this account') : null),
     !a.simulated && !a.configured ? h('div', {class: 'small muted'}, a.which === 'brand' ? 'Turn on the browser (switch to real Instagram) first.' : 'Saved: applies after a restart.') : null);
 }
 function accountsCard(st) {
@@ -578,48 +682,64 @@ function accountsCard(st) {
   const on = h('input', {type: 'checkbox', checked: v['research.enabled'], disabled: !st.can_edit});
   const user = h('input', {type: 'text', value: v['research.account.username'] || '', placeholder: 'research account username', disabled: !st.can_edit});
   const save = h('button', {class: 'small', disabled: !st.can_edit}, 'Save');
-  save.addEventListener('click', busy(save, () => saveSetup({'research.enabled': on.checked, 'research.account.username': user.value.trim()}, 'Research account saved')));
+  save.addEventListener('click', busy(save, () => saveAndRestart({'research.enabled': on.checked, 'research.account.username': user.value.trim()}, 'Research account saved', on.checked && st.environment === 'live' ? ['research'] : null)));
   return setCard('accounts', 'Instagram accounts', 'logins stay on this computer',
     h('div', {id: 'accountRows'}, st.accounts.map((a) => accountRow(a, st))),
-    h('details', {}, h('summary', {}, 'Use a separate research account to find businesses'),
+    h('details', {open: v['research.enabled'] ? true : null}, h('summary', {}, 'Separate research account'),
       h('div', {class: 'form'},
         h('p', {class: 'small ink2'}, 'A second, ordinary Instagram account does all the searching and profile reading, so @' + st.account + ' only sends. Create it by hand, use it normally for a few days, then turn it on here and log it in above.'),
         h('label', {class: 'inline-check'}, on, 'Use a research account'), field('Its username', user), h('div', {class: 'row'}, save))),
-    h('div', {class: 'small muted'}, 'Official Meta API: ' + (st.api.connected ? `connected (${st.api.login_type} login)` : 'not connected (optional; see docs/RESEARCH.md)')));
+    st.api.connected ? h('div', {class: 'small muted'}, `Official Meta API: connected (${st.api.login_type} login)`) : null);
 }
-function testCard(st) {
-  const v = st.values;
-  const input = h('input', {type: 'text', value: (v['rollout.allowed_targets'] || []).join(', '), placeholder: 'e.g. my_second_account', disabled: !st.can_edit});
-  const save = h('button', {class: 'small primary', disabled: !st.can_edit}, 'Save');
-  save.addEventListener('click', busy(save, () => {
-    if (!input.value.trim() && st.environment === 'live' && !confirm('Turn test mode off? Messages can then go to any good-fit business (still only after your approval in Approval mode).')) return Promise.resolve();
-    return saveSetup({'rollout.allowed_targets': input.value}, input.value.trim() ? 'Test mode saved' : 'Test mode is off');
+function testModeCard(st) {
+  const card = testModeBody(st);
+  card.dataset.on = st.test_mode.on ? '1' : '0';
+  return card;
+}
+function testModeBody(st) {
+  const tm = st.test_mode; const off = !st.can_edit;
+  if (tm.on) {
+    const leave = h('button', {class: 'small primary', disabled: off}, 'Leave test mode');
+    leave.addEventListener('click', () => leaveTestMode(st));
+    return setCard('test', 'Test mode', 'on',
+      h('div', {class: 'row'}, pill('warning', `only ${tm.targets.map((t) => '@' + t).join(', ')}`), h('span', {class: 'ink2'}, `can be messaged: ${tm.per_day} a day, no searching for businesses, any follower count`)),
+      h('div', {class: 'row'}, leave));
+  }
+  const input = h('input', {type: 'text', placeholder: 'your test account', disabled: off});
+  const turnOn = h('button', {class: 'small', disabled: off}, 'Turn test mode on');
+  turnOn.addEventListener('click', busy(turnOn, async () => {
+    if (!input.value.trim()) { toast('Type the test account first', true); return; }
+    await act(() => patch('/api/setup/test-mode', {targets: input.value}), 'Test mode is on');
+    S.loadedAt.settings = 0;
   }));
-  const targets = v['rollout.allowed_targets'] || [];
-  return setCard('test', 'Test mode', targets.length ? 'on' : 'off',
-    h('p', {class: 'small ink2'}, 'While this list has names, messages go only to these accounts: ideal for testing with your own second account.'),
-    field('Only message these accounts', input, 'usernames, comma-separated; empty = test mode off'),
-    h('div', {class: 'row'}, save, targets.length ? pill('warning', `only ${targets.map((t) => '@' + t).join(', ')}`) : pill('', 'off: any good-fit business')));
+  return setCard('test', 'Test mode', 'off',
+    h('div', {class: 'row'}, pill('', 'off: any good-fit business can be messaged after your OK')),
+    h('div', {class: 'row'}, input, turnOn),
+    h('span', {class: 'help-text'}, 'On: only that account can receive messages, 1 a day, no searching. Ideal for testing with your own second account.'));
 }
 function limitsCard(st) {
   const inputs = {};
-  const rows = LIMIT_FIELDS.map(([key, label]) => {
+  const row = ([key, label]) => {
     inputs[key] = h('input', {type: 'number', min: 0, value: st.limits[key], placeholder: String(st.limit_defaults[key])});
     return field(label, inputs[key], key in st.limit_overrides ? `changed here (default ${st.limit_defaults[key]})` : `default ${st.limit_defaults[key]}`);
-  });
+  };
   const save = h('button', {class: 'small primary'}, 'Save limits');
   save.addEventListener('click', busy(save, async () => {
     const overrides = {};
-    for (const [key] of LIMIT_FIELDS) { const n = Number(inputs[key].value); if (inputs[key].value !== '' && n !== st.limits[key]) overrides[key] = n; }
+    for (const [key] of [...LIMIT_FIELDS, ...MORE_LIMITS]) { const n = Number(inputs[key].value); if (inputs[key].value !== '' && n !== st.limits[key]) overrides[key] = n; }
     if (!Object.keys(overrides).length) { toast('Nothing changed'); return; }
     await act(() => patch('/api/limits', {overrides}), 'Limits saved: they apply at once');
     S.loadedAt.settings = 0; await loadPage(true);
   }));
   const reset = h('button', {class: 'small'}, 'Back to defaults');
   reset.addEventListener('click', busy(reset, async () => { await act(() => patch('/api/limits', {clear: true}), 'Limits are back to the defaults'); await loadPage(true); }));
-  return setCard('limits', 'Daily limits', 'apply at once',
-    h('p', {class: 'small ink2'}, 'The bot never goes over these, on top of spacing messages out and resting at night. Lower is safer for the account.'),
-    h('div', {class: 'fields-2'}, rows), h('div', {class: 'row'}, save, reset));
+  const u = (S.overview && S.overview.usage) || {}; const l = st.limits;
+  const summary = `${fmt(l.outreach_per_day)} first messages a day, at most ${fmt(l.outreach_per_hour)} an hour, ${Math.round(l.min_seconds_between_sends / 60)}-${Math.round((l.min_seconds_between_sends + l.send_jitter_seconds) / 60)} minutes apart` + (u.send_hours ? `, ${u.send_hours}` : '');
+  return setCard('limits', 'Limits', 'apply at once',
+    h('p', {class: 'small ink2'}, summary + '. The bot never goes over these. Lower is safer for the account.'),
+    h('div', {class: 'fields-2'}, LIMIT_FIELDS.map(row)),
+    h('details', {}, h('summary', {}, 'More limits (rarely needed)'), h('div', {class: 'fields-2'}, MORE_LIMITS.map(row))),
+    h('div', {class: 'row'}, save, reset));
 }
 function hoursPair(value, disabled) {
   const a = h('input', {type: 'time', value: value[0], disabled}); const b = h('input', {type: 'time', value: value[1], disabled});
@@ -646,7 +766,7 @@ function messagesCard(st) {
   return setCard('messages', 'Your messages', null,
     h('div', {class: 'fields-2'}, field('Your name in messages', name), field('Your website', site),
       field('Lowest score worth a message', score, 'businesses scoring less are not messaged (0-100)'),
-      field('Fewest followers worth a message', followers, 'set 0 while testing with a brand-new account')),
+      field('Fewest followers worth a message', followers, 'test mode sets this to 0 by itself')),
     h('label', {class: 'inline-check'}, link, 'Put your website link in the first message'),
     h('div', {class: 'row'}, save));
 }
@@ -654,7 +774,7 @@ function alertsCard(st) {
   const al = st.alerts; const off = !al.can_edit;
   const tokenInput = h('input', {type: 'password', autocomplete: 'off', placeholder: al.telegram_token_set ? 'saved (paste a new one to replace it)' : '123456789:AA…', disabled: off});
   const saveToken = h('button', {class: 'small', disabled: off}, 'Save token');
-  saveToken.addEventListener('click', busy(saveToken, async () => { if (!tokenInput.value.trim()) return; const r = await act(() => post('/api/alerts/telegram', {bot_token: tokenInput.value.trim()}), 'Bot token saved in .env'); if (r) await loadPage(true); }));
+  saveToken.addEventListener('click', busy(saveToken, async () => { if (!tokenInput.value.trim()) return; const r = await act(() => post('/api/alerts/telegram', {bot_token: tokenInput.value.trim()}), 'Bot token saved'); if (r) await loadPage(true); }));
   const result = h('div', {class: 'small'});
   const find = h('button', {class: 'small', disabled: off || !al.telegram_token_set}, 'Find my chat');
   find.addEventListener('click', busy(find, async () => {
@@ -673,20 +793,26 @@ function alertsCard(st) {
   const save = h('button', {class: 'small', disabled: off}, 'Save');
   save.addEventListener('click', busy(save, () => saveSetup({'notifications.min_severity': level.value, 'notifications.dashboard_url': url.value.trim() || null}, 'Alert settings saved')));
   return setCard('alerts', 'Phone alerts (Telegram)', al.telegram_ready ? 'on' : 'off',
-    h('div', {class: 'row'}, al.telegram_ready ? status('good', `alerts go to Telegram chat ${al.telegram_chat_id}`) : status('neutral', 'not set up yet')),
-    field('1. Create a bot: in Telegram message @BotFather, send /newbot, paste the token it gives you', h('div', {class: 'row'}, tokenInput, saveToken), 'kept in the .env file on this computer, never shown again'),
+    h('div', {class: 'row'}, al.telegram_ready ? status('good', `alerts go to Telegram chat ${al.telegram_chat_id}`) : status('neutral', 'not set up yet (optional)')),
+    field('1. Create a bot: in Telegram message @BotFather, send /newbot, paste the token it gives you', h('div', {class: 'row'}, tokenInput, saveToken), 'kept on this computer, never shown again'),
     field('2. Open your new bot in Telegram and press Start, then', h('div', {class: 'row'}, find), null), result,
     field('3. Check it works', h('div', {class: 'row'}, test)),
     h('div', {class: 'fields-2'}, field('Which alerts reach your phone', level), field('Mission Control link in alerts', url, 'e.g. your Tailscale address')),
     h('div', {class: 'row'}, save), off ? h('p', {class: 'small muted'}, st.why_not) : null);
 }
 function checksCard() {
-  const tone = {PASS: 'good', FAIL: 'critical', WARN: 'warning'};
   const o = S.overview || {};
-  return setCard('checks', 'Go-live checks', o.simulated ? 'simulation: nothing to check' : 'needed for Autonomous mode',
-    h('p', {class: 'small ink2'}, 'Autonomous mode on the real account is refused until every required check passes. Approval mode works without them.'),
-    h('div', {id: 'checkRows'}, S.preflight.map((c) => h('div', {class: 'pf'}, status(tone[c.result] || 'neutral', c.result === 'PASS' ? 'ok' : c.result === 'FAIL' ? 'not yet' : 'note'),
-      h('span', {}, h('strong', {}, (CHECK_NAME[c.check] || c.check) + ' '), h('span', {class: 'small ink2'}, c.detail))))));
+  const left = checksLeft();
+  const tone = {PASS: 'good', FAIL: 'critical', WARN: 'warning'};
+  const rows = left.map((c) => { const t = checkTodo(c); return h('li', {}, h('span', {class: 'check todo'}), h('div', {class: 'pt'}, t.text), t.button ? h('button', {class: 'small primary', onclick: t.button[1]}, t.button[0]) : h('span')); });
+  return setCard('checks', 'Go-live checks', o.simulated ? 'simulation: nothing to check' : null,
+    h('p', {class: 'small ink2'}, left.length
+      ? `${plural(left.length, 'thing', 'things')} before "Send by itself". "Ask me before sending" works now: every message waits for your OK.`
+      : 'Ready: you can switch to "Send by itself" whenever you choose (it still asks you to confirm).'),
+    rows.length ? h('ol', {class: 'steps'}, rows) : null,
+    h('details', {}, h('summary', {class: 'small'}, 'Show all checks'),
+      h('div', {id: 'checkRows'}, S.preflight.map((c) => h('div', {class: 'pf'}, status(tone[c.result] || 'neutral', c.result === 'PASS' ? 'ok' : c.result === 'FAIL' ? 'not yet' : 'note'),
+        h('span', {}, h('strong', {}, (CHECK_NAME[c.check] || c.check) + ' '), h('span', {class: 'small ink2'}, c.detail)))))));
 }
 function neverCard(list) {
   const input = h('input', {type: 'text', placeholder: '@username'}); const reason = h('input', {type: 'text', placeholder: 'reason (optional)'});
@@ -702,9 +828,15 @@ function neverCard(list) {
 }
 function safetyCard() {
   const box = h('pre', {class: 'lines'}, 'Loading…');
-  const details = h('details', {}, h('summary', {}, 'Show every safety rule in force'), box);
+  const details = h('details', {}, h('summary', {class: 'small'}, 'Technical: every rule in force'), box);
   details.addEventListener('toggle', async () => { if (details.open) { try { box.textContent = (await api('/api/safety')).lines.join('\n'); } catch (e) { box.textContent = String(e.message || e); } } });
-  return setCard('safety', 'Safety rules', 'always on', h('p', {class: 'small ink2'}, 'Limits, spacing, hours, duplicate protection and stop rules the bot follows whatever the mode.'), details);
+  return setCard('safety', 'Safety rules', 'always on',
+    h('ul', {class: 'plain-list'},
+      h('li', {}, 'Never messages the same business twice, and never anyone on the never-contact list.'),
+      h('li', {}, 'Never replies or follows up once you have written in a chat yourself: that chat is yours.'),
+      h('li', {}, "Stops and waits for you on any Instagram warning, code or captcha. It never tries to get past one."),
+      h('li', {}, 'Rests outside the hours above, spaces messages out, and never goes over the limits.')),
+    details);
 }
 function programCard(st) {
   const p = st.program;
@@ -713,23 +845,30 @@ function programCard(st) {
   const restart = h('button', {class: 'small', disabled: !st.restart_supported}, icon('refresh'), 'Restart the program');
   restart.addEventListener('click', restartNow);
   return setCard('program', 'Program', 'version ' + p.version,
-    h('div', {class: 'small ink2'}, 'Settings file: ', h('code', {}, st.files.config || 'none (demo)')),
-    st.files.overlay ? h('div', {class: 'small ink2'}, 'Changes made here: ', h('code', {}, st.files.overlay)) : null,
-    h('div', {class: 'small ink2'}, 'Database: ', h('code', {}, p.database), ' · secrets: ', h('code', {}, p.env_file)),
+    h('div', {class: 'small ink2'}, 'Settings file: ', h('code', {}, st.files.config || 'none (demo)'), ' · database: ', h('code', {}, p.database)),
     h('div', {class: 'row'}, restart, st.restart_supported ? null : h('span', {class: 'small muted'}, 'started without `run`: restart it yourself')),
     field('Appearance', theme),
-    h('div', {class: 'row'}, h('button', {class: 'small', onclick: () => { forgetToken(); toast('Token forgotten on this computer'); }}, 'Forget the control token here')));
+    h('div', {class: 'row'}, h('button', {class: 'small', onclick: () => { forgetToken(); toast('Token forgotten on this device'); }}, 'Forget the control token on this device')));
 }
-const SETTINGS_SECTIONS = [['where', 'Where it runs'], ['accounts', 'Instagram accounts'], ['test', 'Test mode'], ['limits', 'Limits'], ['hours', 'Hours'], ['messages', 'Messages'], ['alerts', 'Phone alerts'], ['checks', 'Go-live checks'], ['never', 'Never contact'], ['safety', 'Safety rules'], ['program', 'Program']];
+const SETTINGS_SECTIONS = [['instagram', 'Instagram'], ['checks', 'Go-live checks'], ['limits', 'Limits & hours'], ['messages', 'Messages'], ['alerts', 'Phone alerts'], ['advanced', 'Advanced']];
+function group(id, title, ...cards) { return h('section', {class: 'set-group', id: 'group-' + id}, h('h2', {class: 'group-title'}, title), ...cards); }
 function renderSettings(st) {
   S.settingsBuilt = true;
-  $('settingsNav').replaceChildren(...SETTINGS_SECTIONS.map(([id, label]) => h('button', {onclick: () => $('set-' + id).scrollIntoView({behavior: 'smooth', block: 'start'})}, label)));
-  $('settings').replaceChildren(whereCard(st), accountsCard(st), testCard(st), limitsCard(st), hoursCard(st), messagesCard(st), alertsCard(st), checksCard(), neverCard(S.suppressions || []), safetyCard(), programCard(st));
-  $('set-where').classList.add('full');
+  const live = st.environment === 'live';
+  const sections = SETTINGS_SECTIONS.filter(([id]) => live || id !== 'checks');
+  $('settingsNav').replaceChildren(...sections.map(([id, label]) => h('button', {onclick: () => { const el = $('group-' + id); if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'}); }}, label)));
+  fill($('settings'),
+    group('instagram', 'Instagram', whereCard(st), accountsCard(st), live ? testModeCard(st) : null),
+    live ? group('checks', 'Before "Send by itself"', checksCard()) : null,
+    group('limits', 'Limits & hours', limitsCard(st), hoursCard(st)),
+    group('messages', 'Messages', messagesCard(st), neverCard(S.suppressions || [])),
+    group('alerts', 'Phone alerts', alertsCard(st)),
+    h('details', {class: 'set-group advanced', id: 'group-advanced'}, h('summary', {class: 'group-title'}, 'Advanced'), safetyCard(), programCard(st)));
 }
 function updateSettingsLive(st) {  // only the parts that change by themselves: never the forms
   const rows = $('accountRows'); if (rows) rows.replaceChildren(...st.accounts.map((a) => accountRow(a, st)));
   const checks = $('set-checks'); if (checks) checks.replaceWith(checksCard());
+  const test = $('set-test'); if (test && (st.test_mode.on ? '1' : '0') !== test.dataset.on) renderSettings(st);
 }
 async function loadSettings(force) {
   const [st, sup] = await Promise.all([api('/api/setup'), api('/api/suppressions'), pollPreflight()]);
@@ -739,7 +878,7 @@ async function loadSettings(force) {
 const jobRunning = () => Boolean(S.setup && S.setup.accounts.some((a) => a.job && a.job.state === 'running'));
 
 // ============================================================ registration
-PAGES.dashboard = {load: loadDashboard, every: 10000, onEvent: /^(exec\.discover|exec\.inspect|lead\.|action\.|message\.sent|reply\.|conversation\.|lane\.|send\.)/};
+PAGES.dashboard = {load: loadDashboard, every: 10000, onEvent: /^(exec\.discover|exec\.inspect|lead\.|action\.|message\.sent|reply\.|conversation\.|lane\.|send\.|browser\.|testmode\.|mode\.)/};
 PAGES.approvals = {load: loadApprovals, every: 20000, onEvent: /^(action\.|mode\.)/};
 PAGES.leads = {load: loadLeads, every: 60000, onEvent: /^lead\./};
 PAGES.chats = {load: loadChats, every: 15000, onEvent: /^(message\.sent|reply\.|conversation\.|lead\.stage)/};
@@ -755,7 +894,6 @@ function bindPages() {
   $('leadStatus').replaceChildren(...LEAD_FILTERS.map(([v, label]) => h('option', {value: v}, label)));
   $('addLeadBtn').addEventListener('click', addLead);
   $('addCampaign').addEventListener('click', newCampaign);
-  $('findNow2').addEventListener('click', busy($('findNow2'), findNow));
   for (const b of $('rangeChips').querySelectorAll('button')) b.addEventListener('click', () => { store('io_days', b.dataset.days); loadAnalytics(); });
   $('historyBox').addEventListener('toggle', () => loadHistory());
 }

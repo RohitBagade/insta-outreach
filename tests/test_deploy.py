@@ -50,7 +50,8 @@ def test_linux_user_unit_and_windows_logon_task() -> None:
     windows = service_plan("win32", root, root / ".venv/Scripts/python.exe", Path("C:/Users/Rohit"))
     [(launcher, script)] = windows.files.items()
     assert launcher == root / "data" / "run-outreach.cmd"
-    assert f'cd /d "{root}"' in script and "-m insta_outreach run >>" in script and "set PYTHONUTF8=1" in script
+    assert 'cd /d "%~dp0.."' in script and "-m insta_outreach run >>" in script and "set PYTHONUTF8=1" in script
+    assert str(root) not in script  # relative to its own folder: the project can move
     assert windows.start[0].startswith('schtasks /Create /TN "insta-outreach"') and "/SC ONLOGON" in windows.start[0]
     with pytest.raises(ValueError):
         service_plan("sunos5", root, PYTHON, Path("/"))

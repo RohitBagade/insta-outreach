@@ -203,11 +203,8 @@ def _session_check(name: str, services: Services, channel: Channel, now: datetim
         "" if has_profile else f"; no browser profile at {profile}"
     )
     if not (fresh and has_profile):
-        flag = " --account research" if channel is Channel.RESEARCH else ""
-        detail += (
-            " -> Mission Control: Settings > Instagram accounts > Log in, then Test login"
-            f" (or `insta-outreach browser login{flag}`, then `insta-outreach browser probe{flag}`)"
-        )
+        which = "the research account" if channel is Channel.RESEARCH else "Instagram"
+        detail += f" -> Log in to {which} (Mission Control: Settings > Instagram accounts > Log in)"
     return Check(name, fresh and has_profile, detail, True)
 
 

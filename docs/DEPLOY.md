@@ -29,21 +29,25 @@ Nothing is sent anywhere except to Instagram/Meta, to Anthropic when `ANTHROPIC_
 
 ## 2. Install once
 
+Windows: double-click **`Install or update.cmd`** in the project folder. macOS / Linux: `sh install.sh`. Either one finds Python 3.11+, creates `.venv`, gets the latest version with `git pull --ff-only` when the folder is a git clone, installs, runs `setup` and the deterministic self-check (`scenario --check`), then opens Mission Control. Run it again to update; it refuses while Mission Control is running. [GETTING_STARTED.md](GETTING_STARTED.md) is the operator's version of this page.
+
+By hand, the same is:
+
 ```bash
 git clone https://github.com/RohitBagade/insta-outreach.git && cd insta-outreach
 python3 -m venv .venv && source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -e .
-insta-outreach setup --service
+insta-outreach setup                                         # add --service for a start-at-log-in service (§4)
 insta-outreach scenario --check                              # must print IDENTICAL
 ```
 
 `setup` does the following, and is safe to re-run:
 
 - creates `.env` from `.env.example`;
-- generates a long random `CONTROL_API_TOKEN` and prints it once. It never replaces one you already set;
+- generates a long random `CONTROL_API_TOKEN` in `.env` (never printed). It never replaces one you already set;
 - creates `config/settings.yaml`, the data folders and the database;
 - installs Playwright's Chromium;
-- writes a file to double-click that starts the program and opens Mission Control, already signed in: `Mission Control.cmd` on Windows, `Mission Control.command` on macOS, `mission-control.sh` on Linux;
+- writes a file to double-click that starts the program and opens Mission Control, already signed in: `Mission Control.cmd` on Windows, `Mission Control.command` on macOS, `mission-control.sh` on Linux. Its paths are relative, so the folder can be moved; double-clicking it while the program runs just opens the page;
 - with `--service`, writes a start-at-log-in service for your OS (§4) using this folder's real paths, and prints the command to start it.
 
 The rest of `.env` is filled in during [LIVE_CHECKLIST](LIVE_CHECKLIST.md) Phase 1.
@@ -56,7 +60,7 @@ After the first install, nothing needs the command line: every control is on a p
 
 | Page | What it shows | What you can do |
 |---|---|---|
-| **Header and strip** (every page) | SIMULATION or LIVE, the mode, the program's clock; a coloured strip only when something needs you | switch mode (Observe, Draft, Approval, Autonomous), **Pause all**, **Resume…** |
+| **Header and strip** (every page) | SIMULATION or LIVE, the mode, the program's clock; a coloured strip only when something needs you | switch mode (*Watch only*, *Ask me before sending*, *Send by itself*, locked until the go-live checks pass; *Drafting* under Technical details), **Pause all**, **Resume…** |
 | **Dashboard** | one sentence on what the bot is doing; six numbers (found, good fit, messaged, replied, interested, clients) with the last 7 days; the funnel with conversion between steps; today's to-do list; the latest messages; account health and today's limits; the best prospects; recent activity; businesses by category | **Find businesses now**, review messages, stop or resume an account |
 | **Approvals** | every message waiting for you, next to the business's score, facts and why it is a fit | edit, approve, reject & rewrite, don't message |
 | **Businesses** | every business: category, place, followers, score, status, sales stage, when it was found | search, filter, **Add a business**, open its details |
@@ -92,7 +96,7 @@ It keeps serving until Ctrl+C.
 
 `insta-outreach setup --service` writes the right one of these for your computer and prints the start and stop commands. The templates below are for reference, or for doing it by hand. Each restarts the program if it crashes and starts it after a reboot and log-in. On Windows, `setup --service` writes `data\run-outreach.cmd` and prints a `schtasks` command that runs it at log-on. For restart-on-failure, also tick *If the task fails, restart every 1 minute* in the task's *Settings* tab ⚠.
 
-> If a start ever fails with `REFUSING TO START` (live + AUTONOMOUS while a preflight check fails, e.g. the browser session expired), run `insta-outreach mode APPROVAL`. The service then starts normally.
+> If the stored mode is AUTONOMOUS on the live account and a go-live check fails at start (e.g. the browser session expired), the program steps down to APPROVAL by itself, records it in the audit trail, and starts normally.
 
 <details><summary><b>macOS (launchd)</b></summary>
 

@@ -2,6 +2,8 @@
 
 Outreach orchestrator for the **@lemmedeliver** Instagram account. It finds local businesses that could use a LemmeDeliver website, works out why, writes a message specific to each one, and sends it within strict limits. It shares the account with Rohit and stays out of any conversation he handles himself.
 
+> **Start here.** On Windows, double-click **`Install or update.cmd`**, then **`Mission Control.cmd`**. **[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)** is the one page an operator needs; the rest of this README is for reviewers and developers.
+
 Every candidate goes through the same pipeline:
 
 ```
@@ -66,7 +68,7 @@ The demo runs the whole system in `AUTONOMOUS` mode against the simulated world:
 
 It narrates every event as it happens and ends with the commands to inspect the run. Examples: `insta-outreach --config data/demo/settings.yaml explain @sim.smileline.dental`, `audit`, `messages`, `incidents --all`.
 
-Day-to-day use: install once (`insta-outreach setup --service`), then double-click the *Mission Control* file it writes to the project folder (`Mission Control.cmd` on Windows). It starts the program and opens Mission Control, signed in. From a terminal: `insta-outreach run --open`.
+Day-to-day use: double-click `Install or update.cmd` (again later to update; `sh install.sh` on macOS/Linux), then `Mission Control.cmd`. It starts the program and opens Mission Control, signed in. From a terminal: `insta-outreach run --open`.
 
 ### Mission Control: every control on one site
 
@@ -106,13 +108,13 @@ All of these are configurable. The daily limits can be changed at runtime on Mis
 
 Follow **[docs/LIVE_CHECKLIST.md](docs/LIVE_CHECKLIST.md)** step by step. It starts with a sandbox where only your own test account can receive messages. [docs/OPERATIONS.md](docs/OPERATIONS.md) is the day-to-day runbook.
 
-1. Mission Control → Settings → **Switch to my real Instagram…** with test mode on (only your own test account can receive messages). It needs the `CONTROL_API_TOKEN` that `setup` put in `.env`; in live mode the control plane refuses to work without one.
-2. **Browser lane:** Settings → *Instagram accounts* → **Log in…** and log in yourself, including any 2FA, in the window that opens; then **Test login** (read-only).
+1. Mission Control → Settings → **Switch to my real Instagram…** with your test account. **Test mode** is one switch: only that account can receive messages, 1 a day, no follow-ups, no searching. It needs the `CONTROL_API_TOKEN` that `setup` put in `.env` (the Mission Control file signs you in with it); in live mode the control plane refuses to work without one.
+2. **Browser lane:** after the restart a login window opens. Log in yourself, including any 2FA; the login is then checked read-only. The dashboard's *Get started* card walks through the rest of the test.
 3. **API lane (optional, recommended):**
    - create a Meta app with Instagram Login;
    - set `IG_ACCESS_TOKEN`, `IG_USER_ID`, `IG_APP_SECRET` and `IG_WEBHOOK_VERIFY_TOKEN`;
    - subscribe the webhook fields `messages`, `message_echoes` and `comments` to `https://<host>/webhooks/instagram`.
-4. Start in `OBSERVE`, then `DRAFT`, then `APPROVAL` for a while. For the live account, **AUTONOMOUS is refused by code** until every go-live check passes (Settings → *Go-live checks*, or `insta-outreach preflight`). That requires:
+4. The real account starts in `APPROVAL` (*Ask me before sending*): every message waits for a click. Leave test mode when the test conversation worked, and stay in `APPROVAL` for a while. For the live account, **AUTONOMOUS is refused by code** until every go-live check passes (Settings → *Go-live checks*, or `insta-outreach preflight`). That requires:
    - the token;
    - an outbound lane;
    - a browser session verified within 7 days;
@@ -135,6 +137,7 @@ The comment → private-reply path and the API-only reply path are fully within 
 
 ## Documentation
 
+- [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md): **for the operator.** Install, start, go live in test mode, the three modes, what to do when Instagram stops the bot.
 - [docs/VERIFY.md](docs/VERIFY.md): reproduce everything yourself. Expected outputs, where to look, what is and is not proven.
 - [docs/LIVE_CHECKLIST.md](docs/LIVE_CHECKLIST.md): going live with @lemmedeliver, phase by phase, starting with your own test account.
 - [docs/DEPLOY.md](docs/DEPLOY.md): running it on your computer as a service, Mission Control on your phone, Telegram alerts, webhooks, backups.

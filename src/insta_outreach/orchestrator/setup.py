@@ -19,10 +19,11 @@ from sqlalchemy import func, select
 
 from insta_outreach import __version__
 from insta_outreach.deploy import set_env_values
-from insta_outreach.domain.enums import IncidentSeverity
-from insta_outreach.editable_settings import STRATEGY_INFO, SettingsEditor, SettingsError
+from insta_outreach.domain.enums import Environment, IncidentSeverity
+from insta_outreach.editable_settings import STRATEGY_INFO, SettingsEditor, SettingsError, _handles
 from insta_outreach.notify import FanoutNotifier, Notifier, TelegramNotifier, WebhookNotifier, telegram_chats
 from insta_outreach.orchestrator.accounts import AccountSessions
+from insta_outreach.orchestrator.control import ControlError, ControlService
 from insta_outreach.orchestrator.monitor import GOOD_FIT
 from insta_outreach.orchestrator.pipeline import Services
 from insta_outreach.policy.audit import audit
@@ -33,6 +34,12 @@ _CHAT_ID = re.compile(r"^(-?\d{1,20}|@[A-Za-z0-9_]{5,32})$")
 TEST_TITLE = "Test alert from insta-outreach"
 TEST_DETAIL = "If you can read this, alerts reach you. Real alerts: checkpoints, stopped lanes, warm leads."
 
+# Test mode: only the named accounts can be messaged, one message a day, no follow-ups,
+# no searching, and a brand-new test account qualifies (any follower count).
+TEST_MODE_LIMITS = {"limits.outreach_per_day": 1, "limits.outreach_per_hour": 1, "limits.max_followups_per_lead": 0}
+# Leaving test mode: real businesses, but a gentle first pace (raise it in Settings > Limits).
+FIRST_REAL_DAYS_PER_DAY = 5
+
 
 class SetupService:
     def __init__(
@@ -40,11 +47,13 @@ class SetupService:
         services: Services,
         notifier: Notifier,
         accounts: AccountSessions,
+        control: ControlService,
         env_file: Path = Path(".env"),
     ) -> None:
         self.s = services
         self._notifier = notifier
         self.accounts = accounts
+        self._control = control
         self.env_file = env_file
         self.editor = SettingsEditor(services.settings, on_notifications_changed=self.reload_alerts)
 
@@ -57,6 +66,7 @@ class SetupService:
             "environment": settings.environment.value,
             "account": settings.account.username,
             "accounts": self.accounts.accounts(),
+            "test_mode": self.test_mode(),
             "alerts": self.alerts(),
             "api": {
                 "enabled": settings.api.enabled,
@@ -94,6 +104,80 @@ class SetupService:
                 restart_required=outcome["restart_required"],
             )
         return outcome
+
+    # ------------------------------------------------------------- test mode
+    def test_mode(self) -> dict[str, Any]:
+        """What test mode does right now, for the page."""
+        settings = self.s.settings
+        limits = self.s.runtime.limits()
+        targets = list(settings.rollout.allowed_targets)
+        return {
+            "on": bool(targets),
+            "targets": targets,
+            "per_day": limits.outreach_per_day,
+            "searching": any(c.enabled for c in settings.campaigns),
+            "off_per_day": FIRST_REAL_DAYS_PER_DAY,
+        }
+
+    def set_test_mode(self, targets: Any, by: str) -> dict[str, Any]:
+        """One switch for the whole sandbox. On: only the named accounts can be
+        messaged, one message a day, no follow-ups, no searching, any follower
+        count. Off: real businesses again, searches back on, a gentle daily pace."""
+        handles = _handles(targets, "test accounts")
+        campaigns = self.editor.view()["values"]["campaigns"]
+        if handles:
+            changes: dict[str, Any] = {
+                "rollout.allowed_targets": handles,
+                **TEST_MODE_LIMITS,
+                "scoring.min_followers": 0,
+                "campaigns": [dict(c, enabled=False) for c in campaigns],
+            }
+        else:
+            changes = {
+                "rollout.allowed_targets": None,
+                "limits.outreach_per_day": FIRST_REAL_DAYS_PER_DAY,
+                "limits.outreach_per_hour": None,
+                "limits.max_followups_per_lead": None,
+                "scoring.min_followers": None,
+                "campaigns": [dict(c, enabled=True) for c in campaigns],
+            }
+        outcome = self.editor.apply(changes)
+        # A runtime override (Settings > Limits) would hide the preset: the file value must win here.
+        self.s.runtime.unset_limit_overrides([k.split(".", 1)[1] for k in TEST_MODE_LIMITS], by)
+        with self.s.db.session() as session:
+            audit(
+                session,
+                self.s.clock.now(),
+                actor=by,
+                kind="testmode.changed",
+                subject="settings",
+                summary=(
+                    "test mode ON: only "
+                    + ", ".join("@" + h for h in handles)
+                    + " can be messaged, 1 a day, no searching"
+                    if handles
+                    else f"test mode OFF: real businesses, searches on, {FIRST_REAL_DAYS_PER_DAY} first messages a day"
+                ),
+                targets=handles,
+            )
+        if handles:
+            self.ensure_test_leads(by)
+        return outcome | {"test_mode": self.test_mode()}
+
+    def ensure_test_leads(self, by: str) -> list[str]:
+        """The test accounts are businesses too: add them so they are checked and
+        drafted without a second typing. Only on the real Instagram."""
+        if self.s.settings.environment is not Environment.LIVE:
+            return []
+        added = []
+        for handle in self.s.settings.rollout.allowed_targets:
+            try:
+                lead = self._control.add_lead(handle, by=by, note="your test account")
+            except ControlError:  # our own account, or a handle that is not a username
+                continue
+            if lead["created"]:
+                added.append(str(lead["username"]))
+        return added
 
     # ------------------------------------------------------------- campaigns
     def campaigns(self) -> dict[str, Any]:

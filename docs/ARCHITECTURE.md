@@ -1,5 +1,7 @@
 # Architecture
 
+*For developers. To run the bot, see [GETTING_STARTED.md](GETTING_STARTED.md).*
+
 ```
                  ┌────────────────────────── Orchestrator (tick loop) ──────────────────────────┐
  webhooks ──►    │ inbound events → DISCOVER → ANALYZE → DEDUPE → SCORE → PERSONALIZE → queue    │
@@ -68,10 +70,9 @@ Adding a strategy:
 @register
 class DirectoryImport(DiscoveryStrategy):
     name = "directory_import"
-    capability = Capability.INSPECT_PROFILE   # or any discovery capability
+    capability = Capability.INSPECT_PROFILE  # or any discovery capability
 
-    def plan(self, campaign, ctx) -> list[DiscoveryTask]:
-        ...  # return tasks; results come back through interpret()
+    def plan(self, campaign, ctx) -> list[DiscoveryTask]: ...  # return tasks; results come back through interpret()
 ```
 
 ## Actions: the unit of work

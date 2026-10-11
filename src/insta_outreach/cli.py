@@ -41,12 +41,6 @@ def _app(args: argparse.Namespace) -> Any:
 
 
 # ------------------------------------------------------------------ commands
-def cmd_init(args: argparse.Namespace) -> int:
-    app = _prepare(args)
-    _print(app.control.status() | {"limits": "…"})
-    return 0
-
-
 def _prepare(args: argparse.Namespace) -> Any:
     """Config file, data directories and database; returns the app."""
     target = Path(args.config or default_config_path())
@@ -77,10 +71,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
         print("run this from the insta-outreach folder (where pyproject.toml is)", file=sys.stderr)
         return 2
     created, token = ensure_env_file(root)
-    print(f"{'created' if created else 'kept'} .env")
-    if token:
-        print(f"  CONTROL_API_TOKEN generated and saved in .env: {token}")
-        print("  (Mission Control asks for it once per browser tab; keep it private)")
+    print(f"{'created' if created else 'kept'} .env" + (" (with a new control token)" if token else ""))
     load_dotenv(root / ".env")
     _prepare(args)
     if not args.no_browser:
@@ -104,10 +95,8 @@ def cmd_setup(args: argparse.Namespace) -> int:
             print(f"  {command}")
         print(f"logs:  {plan.logs}")
     starter = write_launcher(root)
-    print(f"wrote {starter.name}: double-click it to start the program and open Mission Control")
-    print("next: insta-outreach demo --watch --checkpoint   # a sped-up simulated demo in Mission Control")
-    print(f"      or double-click {starter.name} (everything else, including the Instagram login, is in")
-    print("      Mission Control; docs/LIVE_CHECKLIST.md walks through going live)")
+    print(f"Done. Double-click {starter.name} to start: it opens Mission Control, signed in, with a")
+    print("simulation you can try first. docs/GETTING_STARTED.md walks you through the rest.")
     return 0
 
 
@@ -341,20 +330,36 @@ def cmd_limits(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_tick(args: argparse.Namespace) -> int:
+def startup_guard(app: Any) -> list[Any]:
+    """A live account left in AUTONOMOUS while a go-live check fails starts in APPROVAL
+    (every send waits for a click) instead of refusing to start. The step down is
+    recorded, and never reversed by the program. Returns the failing checks."""
     from insta_outreach.orchestrator.readiness import blocking
+    from insta_outreach.policy.audit import audit
 
-    app = _app(args)
-    if app.settings.environment is Environment.LIVE and app.runtime.mode() is OperatingMode.AUTONOMOUS:
-        failures = blocking(app.control.preflight())
-        if failures:
-            print(
-                "refusing: the live account is set to AUTONOMOUS but preflight fails ("
-                + ", ".join(c.name for c in failures)
-                + "). Switch down first: `insta-outreach mode APPROVAL`.",
-                file=sys.stderr,
+    if app.settings.environment is not Environment.LIVE or app.runtime.mode() is not OperatingMode.AUTONOMOUS:
+        return []
+    failures = blocking(app.control.preflight())
+    if failures:
+        names = ", ".join(c.name for c in failures)
+        with app.db.session() as session:
+            audit(
+                session,
+                app.clock.now(),
+                actor="startup guard",
+                kind="mode.refused",
+                subject="runtime",
+                summary=f"AUTONOMOUS refused at start for the live account: {names}; switched to APPROVAL",
+                failing={c.name: c.detail for c in failures},
             )
-            return 2
+        app.runtime.set_mode(OperatingMode.APPROVAL, "startup guard")
+        print(f"Switched to Approval (every message waits for your OK): go-live checks not passing: {names}")
+    return failures
+
+
+def cmd_tick(args: argparse.Namespace) -> int:
+    app = _app(args)
+    startup_guard(app)
 
     async def run() -> None:
         for _ in range(args.n):
@@ -383,27 +388,30 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def _run_once(args: argparse.Namespace, restarter: Any, open_browser: bool) -> int:
+    import webbrowser
+
     from insta_outreach.app import build_app, describe
-    from insta_outreach.orchestrator.readiness import blocking
     from insta_outreach.reporting import preflight_view
 
     settings = load_settings(args.config)
+    host = args.host or settings.control_api.host
+    port = args.port or settings.control_api.port
+    local = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
+    if not args.no_api and _mission_control_answers(local, port):
+        print(
+            f"Mission Control is already running at http://{local}:{port}/" + ("; opening it." if open_browser else ".")
+        )
+        if open_browser:
+            webbrowser.open(_dashboard_link(local, port, settings))
+        return 0
     app = build_app(settings)
     print(json.dumps(describe(app) | {"mode": app.runtime.mode().value}, indent=2))
     if settings.environment is Environment.LIVE:
-        checks = app.control.preflight()
-        _lines(preflight_view(checks))
-        failures = blocking(checks)
+        _lines(preflight_view(app.control.preflight()))
+        startup_guard(app)
         if app.runtime.mode() is OperatingMode.AUTONOMOUS:
-            if failures:
-                print(
-                    "REFUSING TO START: the live account is set to AUTONOMOUS but required preflight checks fail ("
-                    + ", ".join(c.name for c in failures)
-                    + "). Switch down first: `insta-outreach mode APPROVAL`.",
-                    file=sys.stderr,
-                )
-                return 2
             print("WARNING: LIVE + AUTONOMOUS: eligible outreach will be sent automatically within limits.")
+        app.setup.ensure_test_leads(by="startup")
     if args.no_api:
 
         async def loop() -> None:
@@ -419,8 +427,6 @@ def _run_once(args: argparse.Namespace, restarter: Any, open_browser: bool) -> i
 
     from insta_outreach.api.server import create_api
 
-    host = args.host or settings.control_api.host
-    port = args.port or settings.control_api.port
     config = uvicorn.Config(
         create_api(app, run_orchestrator=True, restarter=restarter),
         host=host,
@@ -430,12 +436,27 @@ def _run_once(args: argparse.Namespace, restarter: Any, open_browser: bool) -> i
     )
     server = uvicorn.Server(config)
     restarter.server = server
-    local = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
     print(f"Mission Control: http://{local}:{port}/", flush=True)
     if open_browser:
         _open_when_started(server, _dashboard_link(local, port, settings))
-    server.run()
+    try:
+        server.run()
+    except SystemExit:  # uvicorn could not bind: something else holds the port
+        print(f"Port {port} is in use by another program. Close it, or start with --port <number>.", file=sys.stderr)
+        return 1
     return 0
+
+
+def _mission_control_answers(host: str, port: int) -> bool:
+    """True when a Mission Control already serves this address (a second double-click)."""
+    import urllib.error
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"http://{host}:{port}/", timeout=1) as response:
+            return b"Mission Control" in response.read(4000)
+    except (urllib.error.URLError, OSError, ValueError):
+        return False
 
 
 def _dashboard_link(host: str, port: int, settings: Settings) -> str:
@@ -648,7 +669,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-v", "--verbose", action="store_true")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("init", help="create config, data dirs and database").set_defaults(fn=cmd_init)
     p = sub.add_parser("setup", help="prepare this computer: .env + control token, config, Chromium, service file")
     p.add_argument("--service", action="store_true", help="also write a start-at-log-in service for this OS")
     p.add_argument("--no-browser", action="store_true", help="skip installing Playwright's Chromium")
@@ -821,7 +841,7 @@ def main(argv: list[str] | None = None) -> int:
             reconfigure(errors="backslashreplace")
     args = build_parser().parse_args(argv)
     load_dotenv()  # secrets from ./.env (never committed); real environment variables win
-    chatty = args.command in ("run", "serve", "tick", "browser", "init", "setup")
+    chatty = args.command in ("run", "serve", "tick", "browser", "setup")
     narrated = args.command in ("demo", "scenario", "browser-demo")  # events are printed as narration
     logging.basicConfig(
         level=logging.DEBUG

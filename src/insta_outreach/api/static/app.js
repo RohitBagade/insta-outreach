@@ -131,10 +131,13 @@ const LEAD_TONE = {QUALIFIED: 'info', OUTREACH_PENDING: 'info', CONTACTED: 'good
 const GOOD_FIT = ['QUALIFIED', 'OUTREACH_PENDING', 'CONTACTED', 'REPLIED', 'HANDED_OFF', 'CLOSED', 'UNREACHABLE'];
 const MODE_NOW = {
   OBSERVE: 'Watching only: finding and checking businesses. Nothing is written or sent.',
-  DRAFT: 'Writing messages for you to read. Nothing is sent.',
-  APPROVAL: 'Sending only the messages you approve.',
-  AUTONOMOUS: 'Sending on its own, within your limits.',
+  DRAFT: 'Drafting: writing messages for you to read. Nothing is sent.',
+  APPROVAL: 'Every message waits for your OK. Nothing is sent without your click.',
+  AUTONOMOUS: 'First messages and follow-ups go out by themselves, within your limits. Replies still wait for your OK.',
 };
+const MODE_LABEL = {OBSERVE: 'Watch only', DRAFT: 'Drafting', APPROVAL: 'Ask me before sending', AUTONOMOUS: 'Send by itself'};
+// Required go-live checks that still fail on the real account: "Send by itself" stays locked until none.
+const checksLeft = () => (S.overview && !S.overview.simulated ? S.preflight.filter((c) => c.required && c.result === 'FAIL') : []);
 const MESSAGE_KIND = {SEND_OUTREACH: 'first message', SEND_FOLLOW_UP: 'follow-up', SEND_REPLY: 'reply'};
 const ACTION_STATE = {
   SUCCEEDED: ['good', 'sent'], APPROVED: ['info', 'queued'], PENDING_APPROVAL: ['warning', 'waiting for you'],
@@ -170,7 +173,9 @@ function forgetToken() { try { sessionStorage.removeItem('io_token'); localStora
 function tokenFromLink() {
   const m = /(?:^#|[#&])token=([^&]+)/.exec(location.hash);
   if (!m) return;
-  setToken(decodeURIComponent(m[1]), false);
+  // On the computer that runs the program the token already sits in its .env: remember it here too,
+  // so a second tab or a restart never asks for it. Elsewhere it lives only in this tab.
+  setToken(decodeURIComponent(m[1]), ['127.0.0.1', 'localhost'].includes(location.hostname));
   history.replaceState(null, '', location.pathname + location.search + '#/dashboard');
 }
 async function call(path, opts = {}) {
@@ -269,8 +274,8 @@ function renderNow(o) {
   } else if (login.length && !halted.length) {
     tone = 'warning'; label = 'Needs you';
     text = login.some((l) => l.channel === 'BROWSER')
-      ? 'Log in to Instagram to start: Settings > Instagram accounts > Log in. Until then the bot leaves the browser alone.'
-      : 'Log in to the research account to start finding businesses: Settings > Instagram accounts > Log in.';
+      ? 'Log in to Instagram to start (the Log in button above). Until then the bot leaves the browser alone.'
+      : 'Log in to the research account to start finding businesses (the Log in button above).';
   } else if (halted.length) {
     const lane = halted.find((l) => l.channel !== 'RESEARCH') || halted[0];
     label = 'Needs you';
@@ -310,7 +315,16 @@ function renderHeader(o) {
   env.replaceChildren(h('span', {class: 'long'}, o.simulated ? 'SIMULATION: no real Instagram' : 'LIVE: real Instagram'), h('span', {class: 'short'}, o.simulated ? 'SIMULATION' : 'LIVE'));
   env.className = 'env ' + (o.simulated ? 'sim' : 'live');
   $('account').textContent = '@' + o.account;
-  for (const b of $('modes').querySelectorAll('button')) b.classList.toggle('on', b.dataset.mode === o.mode);
+  const left = checksLeft().length;
+  for (const b of $('modes').querySelectorAll('button')) {
+    b.classList.toggle('on', b.dataset.mode === o.mode);
+    if (b.dataset.mode === 'DRAFT') b.hidden = !(S.tech || o.mode === 'DRAFT');  // set from the command line
+    if (b.dataset.mode === 'AUTONOMOUS') {  // locked, not disabled: a click explains what is left
+      b.classList.toggle('locked', left > 0 && o.mode !== 'AUTONOMOUS');
+      b.setAttribute('aria-disabled', left > 0 && o.mode !== 'AUTONOMOUS' ? 'true' : 'false');
+      b.title = left ? `Locked: ${plural(left, 'thing', 'things')} to do first (Settings > Go-live checks)` : 'First messages and follow-ups go out by themselves, within your limits.';
+    }
+  }
   const pause = $('pause');
   pause.replaceChildren(icon(o.paused ? 'play' : 'pause'), h('span', {}, o.paused ? 'Resume' : 'Pause all'));
   pause.classList.toggle('on', o.paused);
@@ -325,8 +339,9 @@ function renderAttention(o) {
       h('span', {class: 'small'}, laneWhy(lane && lane.reason)), h('button', {class: 'small', onclick: () => resumeLane(ch)}, 'Resume…')));
   }
   for (const l of o.lanes.filter((x) => x.needs_login)) {
-    items.push(h('span', {class: 'item warning'}, status('warning', l.channel === 'RESEARCH' ? 'Log in to the research account' : 'Log in to Instagram to start'),
-      h('a', {class: 'link', href: '#/settings'}, 'Settings')));
+    const which = l.channel === 'RESEARCH' ? 'research' : 'brand';
+    items.push(h('span', {class: 'item warning'}, status('warning', which === 'research' ? 'Log in to the research account' : 'Log in to Instagram to start'),
+      h('button', {class: 'small primary', onclick: () => loginAccount(which)}, 'Log in…')));
   }
   if (a.open_incidents && !a.halted_lanes.length) {
     items.push(h('span', {class: 'item'}, status('warning', plural(a.open_incidents, 'problem', 'problems') + ' to look at'), h('a', {class: 'link', href: '#/problems'}, 'Open')));
@@ -353,10 +368,34 @@ function renderRestart() {
 }
 async function restartNow() {
   if (!confirm('Restart the program now with the saved settings? It takes a few seconds; this page reconnects by itself.')) return;
-  try {
-    await post('/api/setup/restart');
-    toast('Restarting… this page reconnects by itself.');
-  } catch (e) { toast(String(e.message || e), true); }
+  await restartNowQuiet();
+}
+async function restartNowQuiet() {
+  try { await post('/api/setup/restart'); toast('Restarting… this page reconnects by itself.'); } catch (e) { toast(String(e.message || e), true); }
+}
+// Which Instagram accounts still need their login window after a restart (set by the go-live dialog).
+function pendingLogins() { try { return (sessionStorage.getItem('io_pending_login') || '').split(',').filter(Boolean); } catch { return []; } }
+function setPendingLogins(list) { try { if (list.length) sessionStorage.setItem('io_pending_login', list.join(',')); else sessionStorage.removeItem('io_pending_login'); } catch { /* private mode */ } }
+// Opens the login window on the computer running the program; the person types the password there.
+async function loginAccount(which, quiet) {
+  const account = S.setup && S.setup.accounts.find((a) => a.which === which);
+  const name = account ? '@' + account.username : (which === 'research' ? 'the research account' : 'Instagram');
+  if (!quiet && !confirm(`A browser window opens on this computer. Log in to ${name} yourself and complete any security check there: the program never types your password.\n\nThe window closes by itself once you're in (you have 15 minutes).`)) return;
+  await act(() => post(`/api/accounts/${which}/login`), `Login window for ${name} opening on this computer…`);
+  S.loadedAt.settings = 0; S.loadedAt.dashboard = 0;
+}
+// After the go-live restart: open the login window(s) without another click.
+async function continuePendingLogins() {
+  const pending = pendingLogins(); const o = S.overview; const st = S.setup;
+  if (!pending.length || !o || o.simulated || !st) return;
+  const busyJob = st.accounts.some((a) => a.job && a.job.state === 'running');
+  if (busyJob) return;
+  const which = pending[0];
+  const account = st.accounts.find((a) => a.which === which);
+  const lane = o.lanes.find((l) => l.channel === (which === 'research' ? 'RESEARCH' : 'BROWSER'));
+  setPendingLogins(pending.slice(1));  // one attempt each, whatever happens
+  if (!account || !account.configured || !lane || !lane.needs_login) return continuePendingLogins();
+  await loginAccount(which, true);
 }
 
 // ------------------------------------------------------------ lanes, meters
@@ -386,20 +425,18 @@ function renderLanes(o) {
       h('div', {class: 'small muted'}, l.configured ? laneJob(o, l.channel) : (l.channel === 'API' ? 'not connected (optional)' : 'not switched on')),
       l.configured && l.state !== 'ACTIVE' && l.reason ? h('div', {class: 'small'}, laneWhy(l.reason)) : null,
       l.until_local ? h('div', {class: 'small muted'}, 'until ' + when(l.until_local)) : null,
-      l.configured ? h('div', {class: 'row'},
-        l.state !== 'ACTIVE' ? h('button', {class: 'small', onclick: () => resumeLane(l.channel)}, 'Resume…') : null,
-        l.state === 'ACTIVE' ? h('button', {class: 'small danger', onclick: () => haltLane(l.channel)}, 'Stop') : null) : null);
+      l.configured && l.state !== 'ACTIVE' ? h('div', {class: 'row'}, h('button', {class: 'small', onclick: () => resumeLane(l.channel)}, 'I fixed it on Instagram: resume')) : null);
   }));
 }
 function resumeLane(ch) {
   const name = laneName(ch);
-  const note = prompt(`Resume the ${name.toLowerCase()}?\n\nOnly do this after you fixed the problem yourself, e.g. confirmed it's you in the Instagram app.\n\nNote for the history:`, 'fixed it on my phone');
-  if (note !== null) act(() => post(`/api/lanes/${ch}/resume`, {note}), name + ' resumed');
+  if (!confirm(`Did you fix it in Instagram yourself (e.g. confirmed it's you in the app)? The ${name.toLowerCase()} resumes now.`)) return;
+  act(() => post(`/api/lanes/${ch}/resume`, {note: 'resumed from Mission Control'}), name + ' resumed');
 }
 function haltLane(ch) {
   const name = laneName(ch);
-  const reason = prompt(`Stop the ${name.toLowerCase()} now? It stays stopped until you resume it.\n\nReason (for the history):`, 'stopped by hand');
-  if (reason !== null) act(() => post(`/api/lanes/${ch}/halt`, {reason}), name + ' stopped');
+  if (!confirm(`Stop the ${name.toLowerCase()} now? It stays stopped until you resume it.`)) return;
+  act(() => post(`/api/lanes/${ch}/halt`, {reason: 'stopped from Mission Control'}), name + ' stopped');
 }
 function togglePause() {
   const paused = S.overview && S.overview.paused;
@@ -416,20 +453,23 @@ async function pollOverview() {
   if (S.overview && S.overview.environment !== o.environment) { S.cursor = null; S.recent = []; }  // another database
   S.overview = o; renderHeader(o); renderAttention(o); renderNow(o); renderLanes(o); renderUsage(o);
   if (typeof renderProgress === 'function') renderProgress();
+  if (typeof renderStarted === 'function') renderStarted();
   if (restarted) {  // everything may differ now (another Instagram, other accounts): draw the page again
     toast('Restarted with the saved settings');
     S.loadedAt = {}; S.settingsBuilt = false; S.campaigns = null;
     await Promise.allSettled([pollSetup(), pollPreflight()]);
     await loadPage(true);
   }
+  if (pendingLogins().length) { if (Date.now() - S.setupAt > 1500) await pollSetup().catch(() => {}); await continuePendingLogins(); }
 }
 async function pollSetup() {
   S.setup = await api('/api/setup'); S.setupAt = Date.now(); renderRestart();
 }
 async function pollPreflight() {
   S.preflight = await api('/api/preflight'); S.preflightAt = Date.now();
-  const failing = S.preflight.filter((c) => c.result === 'FAIL').length;
-  $('b-settings').textContent = S.overview && !S.overview.simulated && failing ? failing : '';
+  const left = checksLeft().length;
+  $('b-settings').textContent = left || '';
+  if (S.overview) renderHeader(S.overview);
 }
 
 // ----------------------------------------------------------------- feed
@@ -539,6 +579,7 @@ function setTech(on) {
   S.tech = on; store('io_tech', on ? '1' : '0');
   $('techToggle').checked = on; $('feed').classList.toggle('tech', on);
   refilter();
+  if (S.overview) renderHeader(S.overview);  // the Drafting button shows with the technical view
 }
 
 // --------------------------------------------------------------- drawer
@@ -583,7 +624,7 @@ async function openLead(handle) {
       h('div', {class: 'row'},
         h('button', {onclick: () => act(() => post('/api/conversations/' + encodeURIComponent('@' + handle) + '/claim'), 'This chat is now yours')}, 'Take over this chat'),
         live ? h('a', {class: 'btn', href: `https://www.instagram.com/${encodeURIComponent(handle)}/`, target: '_blank', rel: 'noopener noreferrer'}, icon('external'), 'Open on Instagram') : null,
-        h('button', {class: 'danger', onclick: () => { const reason = prompt('Never contact @' + handle + '? Reason:', 'asked in person'); if (reason !== null) act(() => post('/api/suppressions', {kind: 'USERNAME', value: handle, reason}), 'Added to the never-contact list'); }}, 'Never contact')),
+        h('button', {class: 'danger', onclick: () => { if (confirm('Never contact @' + handle + '? Any queued message to them is cancelled. You can undo this in Settings > Never contact.')) act(() => post('/api/suppressions', {kind: 'USERNAME', value: handle, reason: 'from Mission Control'}), 'Added to the never-contact list'); }}, 'Never contact')),
       h('details', {class: 'trail-box'}, h('summary', {}, 'Why the bot did what it did (step by step)'), h('pre', {class: 'trail'}, explain.lines.join('\n'))));
   } catch (e) { body.replaceChildren(h('div', {class: 'empty'}, String(e.message || e))); }
 }
@@ -601,10 +642,12 @@ function bindShell() {
       const mode = b.dataset.mode; const o = S.overview; if (!o || o.mode === mode) return;
       let confirmFlag = false;
       if (mode === 'AUTONOMOUS' && !o.simulated) {
-        if (!confirm('Switch the REAL account to Autonomous?\n\nMessages will be sent automatically within every limit. It is refused unless every go-live check passes.')) return;
+        const left = checksLeft();
+        if (left.length) { toast(`Not yet: ${plural(left.length, 'thing', 'things')} to do first. Opening the list.`); location.hash = '#/settings'; setTimeout(() => { const el = $('set-checks'); if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'}); }, 400); return; }
+        if (!confirm('Let the REAL account send by itself?\n\nFirst messages and follow-ups go out automatically, within every limit and only in the sending hours. Replies still wait for your OK. You can switch back any time.')) return;
         confirmFlag = true;
       }
-      act(() => post('/api/mode', {mode, confirm: confirmFlag}), 'Mode is now ' + b.textContent);
+      act(() => post('/api/mode', {mode, confirm: confirmFlag}), 'Mode is now ' + (MODE_LABEL[mode] || b.textContent));
     });
   }
   $('pause').addEventListener('click', togglePause);

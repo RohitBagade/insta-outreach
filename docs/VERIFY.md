@@ -193,7 +193,7 @@ In live mode AUTONOMOUS requires **all** of the following:
 - **at least 3 human-approved live sends that succeeded**, which is what the APPROVAL phase produces;
 - `--confirm` (the CLI asks).
 
-If the stored mode is AUTONOMOUS but the checks fail (e.g. the database was edited by hand), `insta-outreach run` refuses to start: `REFUSING TO START …`. Tests prove each of these: `pytest tests/test_readiness.py -v`.
+If the stored mode is AUTONOMOUS but the checks fail (e.g. the database was edited by hand, or the session expired), `insta-outreach run` steps down to APPROVAL before it starts and records `mode.refused` in the audit trail. Tests prove each of these: `pytest tests/test_readiness.py -v`.
 
 ## 6. Safety limits currently configured
 

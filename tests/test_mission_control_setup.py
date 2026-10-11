@@ -4,6 +4,7 @@ the home page's numbers, analytics and sales stages."""
 from __future__ import annotations
 
 import asyncio
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -16,7 +17,7 @@ from sqlalchemy import select
 
 from insta_outreach.api.server import Restarter, create_api
 from insta_outreach.config import load_settings, overlay_path
-from insta_outreach.deploy import launcher, set_env_values
+from insta_outreach.deploy import launcher, set_env_values, write_launcher
 from insta_outreach.domain.enums import (
     ActionStatus,
     Channel,
@@ -138,6 +139,48 @@ def test_real_instagram_needs_the_control_token(file_app, config_file: Path, mon
     assert file_app.settings.environment is Environment.LOCAL  # until the restart
 
 
+def test_test_mode_is_one_switch_for_the_whole_sandbox(file_app, config_file: Path, monkeypatch) -> None:
+    client = client_for(file_app)
+    file_app.runtime.set_limit_overrides({"outreach_per_day": 12}, "test")  # would hide the preset
+    out = client.patch("/api/setup/test-mode", json={"targets": "@My.Test.Account"}, headers=AUTH).json()
+    assert out["test_mode"] == {
+        "on": True,
+        "targets": ["my.test.account"],
+        "per_day": 1,
+        "searching": False,
+        "off_per_day": 5,
+    }
+    running = file_app.settings
+    assert running.rollout.allowed_targets == ["my.test.account"] and running.scoring.min_followers == 0
+    assert file_app.runtime.limits().outreach_per_day == 1 and file_app.runtime.limits().max_followups_per_lead == 0
+    assert not any(c.enabled for c in running.campaigns)
+    assert "outreach_per_day" not in file_app.runtime.limit_overrides()
+    saved = yaml.safe_load(overlay_path(config_file).read_text(encoding="utf-8"))
+    assert saved["limits"] == {"outreach_per_day": 1, "outreach_per_hour": 1, "max_followups_per_lead": 0}
+    fresh = load_settings(config_file)  # survives a restart into the real account
+    assert fresh.limits.outreach_per_day == 1 and fresh.rollout.allowed_targets == ["my.test.account"]
+    titles = [i["title"] for i in file_app.monitor.feed(limit=20)["items"] if i["kind"] == "testmode.changed"]
+    assert titles == ["Test mode is on: only @my.test.account can be messaged"]
+
+    out = client.patch("/api/setup/test-mode", json={"targets": ""}, headers=AUTH).json()
+    assert out["test_mode"]["on"] is False and out["test_mode"]["searching"] is True
+    assert running.rollout.allowed_targets == [] and running.scoring.min_followers == 100
+    assert file_app.runtime.limits().outreach_per_day == 5  # a gentle first pace, visible in Settings
+    assert file_app.runtime.limits().outreach_per_hour == 4 and file_app.runtime.limits().max_followups_per_lead == 2
+    assert all(c.enabled for c in running.campaigns)
+    assert client.get("/api/setup", headers=AUTH).json()["values"]["limits.outreach_per_day"] == 5
+    assert client.patch("/api/setup/test-mode", json={"targets": "not a handle!"}, headers=AUTH).status_code == 400
+
+
+async def test_test_accounts_become_businesses_on_the_real_account(make_app, settings, clock) -> None:
+    settings.rollout.allowed_targets = ["My.Test.Account", "lemmedeliver"]  # our own account is skipped
+    app = live_app(make_app, settings, clock)
+    assert app.setup.ensure_test_leads(by="startup") == ["my.test.account"]
+    assert app.setup.ensure_test_leads(by="startup") == []  # idempotent
+    lead = app.control.lead_detail("my.test.account")
+    assert lead["status"] == "DISCOVERED" and lead["sources"][0]["strategy"] == "manual"
+
+
 def test_demo_settings_are_fixed(make_app) -> None:
     client = client_for(make_app())  # built in code, like the demo: no settings file
     assert client.get("/api/setup", headers=AUTH).json()["can_edit"] is False
@@ -160,11 +203,21 @@ def test_restart_is_offered_only_by_the_run_command(make_app) -> None:
 
 
 def test_launcher_starts_the_program_and_opens_the_page(tmp_path: Path) -> None:
-    path, content = launcher("win32", tmp_path, Path("C:/py/python.exe"))
+    path, content = launcher("win32", tmp_path)
     assert path.name == "Mission Control.cmd" and "\r\n" in content
     assert "-m insta_outreach run --open" in content and "PYTHONUTF8=1" in content
-    path, content = launcher("linux", tmp_path, Path("/venv/bin/python"))
+    assert str(tmp_path) not in content  # relative to its own folder: the folder can be moved
+    assert "Install or update.cmd" in content
+    path, content = launcher("linux", tmp_path)
     assert path.name == "mission-control.sh" and content.startswith("#!/bin/sh")
+    assert Path("Install or update.cmd").read_bytes().count(b"\r\n") > 10  # Windows line endings
+
+
+def test_setup_replaces_an_old_launcher(tmp_path: Path) -> None:
+    path, content = launcher(sys.platform, tmp_path)
+    path.write_text("old launcher with absolute paths", encoding="utf-8")
+    assert write_launcher(tmp_path) == path
+    assert path.read_bytes() == content.encode("utf-8")
 
 
 # -------------------------------------------------------------------- alerts
@@ -247,6 +300,7 @@ async def test_login_window_pauses_the_lane_and_records_the_session(make_app, se
         await finish.wait()
         return True, "logged in"
 
+    settings.account.username = next(iter(app.world.accounts))  # a profile the simulated Instagram knows
     app.setup.accounts._login = fake_login
     job = app.setup.accounts.start_login("brand", by="operator")
     assert job["state"] == "running"
@@ -259,10 +313,28 @@ async def test_login_window_pauses_the_lane_and_records_the_session(make_app, se
     finish.set()
     await app.setup.accounts._jobs["brand"].task
     row = app.setup.accounts.accounts()[0]
+    # Logging in also proves the login, read-only, in the same job: one row says both happened.
     assert row["job"]["state"] == "ok" and row["lane_state"] == LaneState.ACTIVE.value
-    assert row["verified_via"] == "login" and seen == ["lemmedeliver"]
+    assert row["job"]["message"] == "Logged in and checked: your profile opened normally."
+    assert row["verified_via"] == "check" and seen == [settings.account.username]
     with pytest.raises(Exception, match="research"):
         app.setup.accounts.start_login("research", by="operator")
+
+
+async def test_login_on_a_stopped_lane_does_not_run_the_check(make_app, settings, clock) -> None:
+    app = live_app(make_app, settings, clock)
+    app.control.halt_lane(Channel.BROWSER, by="test", reason="checkpoint by hand")
+
+    async def fake_login(chosen: Any, announce: Any) -> tuple[bool, str]:
+        return True, "logged in"
+
+    app.setup.accounts._login = fake_login
+    app.setup.accounts.start_login("brand", by="operator")
+    await app.setup.accounts._jobs["brand"].task
+    row = app.setup.accounts.accounts()[0]
+    assert row["job"]["state"] == "ok" and row["verified_via"] == "login"
+    assert "Press Resume" in row["job"]["message"]  # the person decides when the bot continues
+    assert row["lane_state"] == LaneState.HALTED.value
 
 
 async def test_test_login_is_read_only_and_stops_on_a_checkpoint(make_app, settings, clock) -> None:

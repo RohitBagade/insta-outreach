@@ -134,9 +134,11 @@ def service_plan(platform: str, root: Path, python: Path, home: Path) -> Service
         )
     if platform == "win32":
         launcher = root / "data" / "run-outreach.cmd"
-        # UTF-8 mode: the log file is not a console, and prospects' messages can contain emoji.
+        # Relative to its own folder, so the project can move; UTF-8 mode because the
+        # log file is not a console, and prospects' messages can contain emoji.
         content = (
-            f'@echo off\r\nset PYTHONUTF8=1\r\ncd /d "{root}"\r\n"{python}" -m insta_outreach run >> "{log}" 2>&1\r\n'
+            '@echo off\r\nset PYTHONUTF8=1\r\ncd /d "%~dp0.."\r\n'
+            '"%~dp0..\\.venv\\Scripts\\python.exe" -m insta_outreach run >> "%~dp0outreach.log" 2>&1\r\n'
         )
         return ServicePlan(
             platform,
@@ -152,24 +154,32 @@ def current_service_plan(root: Path) -> ServicePlan:
     return service_plan(sys.platform, root.resolve(), Path(sys.executable), Path.home())
 
 
-def launcher(platform: str, root: Path, python: Path) -> tuple[Path, str]:
+def launcher(platform: str, root: Path) -> tuple[Path, str]:
     """A file to double-click: starts the program and opens Mission Control.
-    Closing its window stops the program."""
+    Closing its window stops the program. Paths are relative to the file's own
+    folder, so the project folder can be moved or copied."""
     if platform == "win32":
         content = (
             "@echo off\r\ntitle Mission Control - keep this window open while it runs\r\n"
-            f'set PYTHONUTF8=1\r\ncd /d "{root}"\r\n"{python}" -m insta_outreach run --open\r\n'
-            "echo.\r\necho Mission Control has stopped. Press any key to close this window.\r\npause >nul\r\n"
+            'set PYTHONUTF8=1\r\ncd /d "%~dp0"\r\n'
+            'if not exist ".venv\\Scripts\\python.exe" (\r\n'
+            '  echo Not installed yet: double-click "Install or update.cmd" first.\r\n  pause\r\n  exit /b 1\r\n)\r\n'
+            '".venv\\Scripts\\python.exe" -m insta_outreach run --open %*\r\n'
+            "if errorlevel 1 (\r\n  echo.\r\n"
+            "  echo Mission Control has stopped. Press any key to close this window.\r\n  pause >nul\r\n)\r\n"
         )
         return root / "Mission Control.cmd", content
     name = "Mission Control.command" if platform == "darwin" else "mission-control.sh"
-    content = f'#!/bin/sh\ncd "{root}" || exit 1\nexec "{python}" -m insta_outreach run --open\n'
+    content = '#!/bin/sh\ncd "$(dirname "$0")" || exit 1\nexec .venv/bin/python -m insta_outreach run --open "$@"\n'
     return root / name, content
 
 
 def write_launcher(root: Path) -> Path:
-    path, content = launcher(sys.platform, root.resolve(), Path(sys.executable))
-    path.write_text(content, encoding="utf-8", newline="")
-    if sys.platform != "win32":
-        path.chmod(0o755)
+    """Write the launcher for this OS. An older one (e.g. with absolute paths) is
+    replaced, so every install or update leaves the current version."""
+    path, content = launcher(sys.platform, root.resolve())
+    if not path.exists() or path.read_bytes() != content.encode("utf-8"):
+        path.write_text(content, encoding="utf-8", newline="")
+        if sys.platform != "win32":
+            path.chmod(0o755)
     return path

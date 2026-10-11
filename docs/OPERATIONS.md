@@ -2,11 +2,11 @@
 
 ## 1. Install and initialise
 
+The operator installs with `Install or update.cmd` (Windows) or `sh install.sh`; see [GETTING_STARTED.md](GETTING_STARTED.md). By hand:
+
 ```bash
 uv venv --python 3.11 && uv pip install -e ".[dev]"
-.venv/bin/playwright install chromium        # skip if a Chromium is already provided (PLAYWRIGHT_BROWSERS_PATH)
-.venv/bin/insta-outreach init                 # config/settings.yaml (local, OBSERVE) + data dirs + database
-cp .env.example .env                          # fill in secrets; loaded automatically; never commit .env
+.venv/bin/insta-outreach setup                # .env with a control token, config/settings.yaml (local, OBSERVE), data dirs, database, Chromium
 ```
 
 Before anything live, run through **[VERIFY.md](VERIFY.md)** (simulation, reproducible) and then **[LIVE_CHECKLIST.md](LIVE_CHECKLIST.md)** (phase by phase, starting with a sandbox on your own test account).
@@ -22,6 +22,7 @@ The **runtime mode, the pause switch and limit overrides** are stored in the dat
 ## 2. Rolling out safely
 
 1. `environment: local`. Run `insta-outreach demo` and `insta-outreach run` against the simulator until the behaviour and messages look right. Nothing here touches Instagram.
+   Mission Control's **Switch to my real Instagram…** then does steps 2–4 in one go for a sandbox: live, **test mode** (only your test account, 1 a day, no follow-ups, no searching) and **APPROVAL**. Leaving test mode turns searches back on at 5 first messages a day. The steps below are the same rollout by hand.
 2. `environment: live`, mode **OBSERVE**. The live database is separate (`data/live.db`) and simulated leads can never leak into it. Discovery and analysis run on the real account; check `insta-outreach leads` for sensible qualification.
 3. **DRAFT**. Messages are written but never sent. Read them in Mission Control or with `insta-outreach approvals`.
 4. **APPROVAL**. You approve each message (optionally edited) or reject it (`--redraft` for a fresh draft). Stay here until the drafts are consistently good.
@@ -32,7 +33,7 @@ The **runtime mode, the pause switch and limit overrides** are stored in the dat
    - no halted lane or open incident;
    - at least 3 human-approved live sends that succeeded.
 
-   Then `insta-outreach mode AUTONOMOUS` still asks for confirmation. `run` and `tick` refuse to start if the stored mode is AUTONOMOUS while preflight fails. Sends happen automatically inside every limit. Replies from prospects still wait for approval unless `replies.autonomous: true`; interested or question replies are handed to you.
+   Then `insta-outreach mode AUTONOMOUS` still asks for confirmation. If the stored mode is AUTONOMOUS while preflight fails, `run` and `tick` step down to APPROVAL first (audited as `mode.refused`). Sends happen automatically inside every limit. Replies from prospects still wait for approval unless `replies.autonomous: true`; interested or question replies are handed to you.
 
 Going back down is always safe. Switching from AUTONOMOUS to APPROVAL moves already auto-approved messages back into the approval queue.
 

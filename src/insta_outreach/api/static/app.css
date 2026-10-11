@@ -193,6 +193,8 @@ button svg.icon, .btn svg.icon { width: 16px; height: 16px; }
 .modes button { border: 0; border-radius: 0; padding: 6px 12px; background: transparent; font-size: 13px; }
 .modes button + button { border-left: 1px solid var(--line); }
 .modes button.on { background: var(--accent); color: #fff; font-weight: 600; }
+.modes button.locked { color: var(--muted); }
+.modes button.locked::before { content: "🔒 "; font-size: 11px; }
 .pause.on { background: var(--critical); border-color: var(--critical); color: #fff; font-weight: 600; }
 .clock { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 
@@ -273,6 +275,18 @@ button svg.icon, .btn svg.icon { width: 16px; height: 16px; }
 .fstep .fv { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
 .fstep .fc { grid-column: 2 / 4; font-size: 11px; color: var(--muted); margin-top: -6px; }
 
+/* get started (the go-live sequence) ---------------------------------------------- */
+.started { border-left: 4px solid var(--accent); }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.steps li { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; align-items: start; }
+.steps li.done .pt { color: var(--ink-2); }
+.steps li.next .pt { font-weight: 600; }
+.steps .pt { font-weight: 500; }
+.steps .ps { font-size: 12px; color: var(--muted); }
+.steps .check { font-size: 11px; font-weight: 700; color: var(--ink-2); }
+.steps .check.done, .steps .check.todo { color: #fff; }
+.steps .check.todo { background: var(--accent); border-color: var(--accent); }
+
 /* progress checklist -------------------------------------------------------------- */
 .progress { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .progress li { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; align-items: start; }
@@ -305,6 +319,7 @@ button svg.icon, .btn svg.icon { width: 16px; height: 16px; }
 .recent { list-style: none; margin: 0; padding: 0; display: grid; }
 .recent li { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 8px; padding: 7px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
 .recent li:first-child { border-top: 0; }
+.recent li.empty { display: block; }
 .recent .t { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .i { font-size: 12px; text-align: center; }
 .i.good { color: var(--good); } .i.warning { color: var(--warning); } .i.critical { color: var(--critical); } .i.info { color: var(--accent); } .i.neutral { color: var(--muted); }
@@ -404,9 +419,19 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .hours { display: flex; gap: 8px; align-items: center; }
 .hours input { width: 136px; }
 .settings-nav { display: flex; flex-wrap: wrap; gap: 6px; }
+.set-group { display: grid; gap: 12px; align-content: start; }
+.group-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 6px 0 0; }
+details.set-group.advanced > summary { cursor: pointer; list-style: none; display: flex; gap: 6px; align-items: center; }
+details.set-group.advanced > summary::before { content: "▸"; }
+details.set-group.advanced[open] > summary::before { content: "▾"; }
+.plain-list { margin: 0; padding-left: 18px; color: var(--ink-2); display: grid; gap: 4px; }
+.approval input.why { flex: 1 1 200px; min-width: 0; font-size: 12px; }
+.way details > summary { cursor: pointer; color: var(--accent-ink); }
+details.advanced > summary { cursor: pointer; color: var(--accent-ink); }
 .set-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
 .set-grid .full { grid-column: 1 / -1; }
 .acct-card { display: grid; gap: 8px; padding: 12px 0; border-top: 1px solid var(--line); }
+#set-checks .steps li .pt { font-weight: 500; }
 .acct-card:first-child { border-top: 0; padding-top: 0; }
 .job { font-size: 12px; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line); }
 .job.ok { border-color: var(--good); }

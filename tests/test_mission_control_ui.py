@@ -7,10 +7,11 @@ from typing import Any
 
 import pytest
 from playwright.async_api import Page, async_playwright, expect
+from pydantic import SecretStr
 
 from insta_outreach.api.server import BackgroundServer
-from insta_outreach.domain.enums import ActionStatus, OperatingMode
-from tests.conftest import run_ticks
+from insta_outreach.domain.enums import ActionStatus, Channel, Environment, OperatingMode
+from tests.conftest import logged_in, run_ticks
 
 pytestmark = pytest.mark.browser
 HOSTILE = '<img src=x onerror="window.__pwned=1">'
@@ -56,10 +57,15 @@ async def test_dashboard_renders_and_drives_the_control_plane(make_app, clock) -
             await page.goto(server.url)
             await expect(page.locator("#conn")).to_contain_text("live")  # no eval: the page's CSP forbids it
             assert "SIMULATION" in await text(page, "#env")
-            assert await text(page, "#modes button.on") == "Approval"
+            assert await text(page, "#modes button.on") == "Ask me before sending"
+            assert await page.locator("#modes button[data-mode='DRAFT']").count() == 1  # exists, hidden
+            await expect(page.locator("#modes button[data-mode='DRAFT']")).to_be_hidden()
             overview = app.monitor.overview()
             await expect(page.locator("#kpi-found .value")).to_have_text(str(overview["funnel"]["found"]))
-            assert await text(page, "#nowText") == "Sending only the messages you approve."
+            assert (
+                await text(page, "#nowText") == "Every message waits for your OK. Nothing is sent without your click."
+            )
+            await expect(page.locator("#getStarted")).to_be_hidden()  # the go-live card is for the real account
             await expect(page.locator("#funnel .fstep")).to_have_count(6)
             await expect(page.locator("#categories svg.chart")).to_be_visible()
 
@@ -90,9 +96,9 @@ async def test_dashboard_renders_and_drives_the_control_plane(make_app, clock) -
                 f"You approved the message to @{approved[0]['target_username']}"
             )
 
-            # Stop the browser from Account health, see it flagged, resume it.
+            # Instagram stops the browser: it is flagged, and one confirm resumes it (no typing).
             await go(page, "dashboard")
-            await page.locator("#lanes .lane", has_text="Browser").locator("button.danger").click()
+            app.control.halt_lane(Channel.BROWSER, by="test", reason="checkpoint by hand")
             await page.wait_for_selector("#attention .item.critical")
             assert "the browser is stopped" in await text(page, "#attention")
             await expect(page.locator("#nowMark")).to_have_text("Needs you")
@@ -123,6 +129,10 @@ async def test_dashboard_renders_and_drives_the_control_plane(make_app, clock) -
             assert app.runtime.limits().outreach_per_day == 7
             # This app was built in code (like the demo): its settings file can't be changed.
             await expect(page.locator("#set-where button", has_text="real Instagram")).to_be_disabled()
+            assert (
+                await page.locator("#settings .set-group").count() == 5
+            )  # Instagram, Limits & hours, Messages, Phone alerts, Advanced
+            await expect(page.locator("#set-safety")).to_be_hidden()  # folded under Advanced
 
             # The other pages draw without errors.
             await go(page, "analytics")
@@ -160,3 +170,66 @@ async def test_phone_layout_has_a_menu_and_no_sideways_scrolling(make_app, clock
         finally:
             await browser.close()
             await server.stop()
+
+
+async def test_get_started_card_walks_the_real_account_through_test_mode(make_app, settings, clock) -> None:
+    from insta_outreach.execution.simulator import SimulatedApiAdapter, SimulatedBrowserAdapter, SimulatedWorld
+
+    world = SimulatedWorld.seeded(clock, 7)
+    settings.environment = Environment.LIVE
+    settings.account.username = next(iter(world.accounts))  # a profile the simulated Instagram knows
+    settings.rollout.allowed_targets = ["my.test.account"]
+    app = make_app(
+        settings=settings,
+        world=world,
+        adapters={Channel.API: SimulatedApiAdapter(world), Channel.BROWSER: SimulatedBrowserAdapter(world)},
+    )
+
+    async def fake_login(chosen: Any, announce: Any) -> tuple[bool, str]:
+        logged_in(settings)  # what a real login leaves behind: a saved browser profile
+        return True, "logged in"
+
+    app.setup.accounts._login = fake_login
+    app.settings.control_api.token = SecretStr("ui-token")  # required on the real account
+    server = await BackgroundServer.start(app, port=free_port())
+    problems: list[str] = []
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch()
+        page = await browser.new_page(viewport={"width": 1280, "height": 900})
+        page.on("console", lambda m: problems.append(m.text) if m.type == "error" else None)
+        page.on("pageerror", lambda e: problems.append(str(e)))
+        page.on("dialog", lambda d: d.accept())
+        try:
+            await page.goto(server.url + "/#token=ui-token")  # how the Mission Control file opens it: signed in
+            await expect(page.locator("#env")).to_contain_text("LIVE")
+            assert "token" not in page.url
+            card = page.locator("#getStarted")
+            await expect(card).to_be_visible()
+            steps = card.locator("li")
+            await expect(steps.first).to_contain_text("Log in to @")
+            await expect(steps.nth(1)).to_contain_text("Test mode is on: only @my.test.account")
+            # "Send by itself" is locked while go-live checks fail; the click explains, it never switches.
+            await expect(page.locator("#modes button[data-mode='AUTONOMOUS']")).to_have_attribute(
+                "aria-disabled", "true"
+            )
+            await page.locator("#modes button[data-mode='AUTONOMOUS']").click(force=True)  # aria-disabled, not disabled
+            await expect(page.locator("#toast")).to_contain_text("Not yet")
+            assert app.runtime.mode() is not OperatingMode.AUTONOMOUS
+            await page.goto(server.url + "#/dashboard")
+            # The first step has the real button: the login window, then the read-only check.
+            await card.locator("li.next button", has_text="Log in").click()
+            await expect(steps.first).to_contain_text("Logged in to @", timeout=15000)
+            await expect(steps.first).not_to_have_class("next", timeout=15000)
+            # The test account becomes a business (at start the program does this by itself).
+            await card.locator("li.next button", has_text="Add it").click()
+            await expect(steps.nth(2)).to_contain_text("is in Businesses", timeout=15000)
+            assert app.control.lead_detail("my.test.account")["status"] == "DISCOVERED"
+            # Then the mode, with its button.
+            await card.locator("li.next button", has_text="Ask me before sending").click()
+            await expect(page.locator("#toast")).to_have_text("Mode is now Ask me before sending")
+            assert app.runtime.mode() is OperatingMode.APPROVAL
+            await expect(card.locator("li", has_text='Mode is "Ask me before sending"')).to_be_visible()
+        finally:
+            await browser.close()
+            await server.stop()
+    assert problems == []
